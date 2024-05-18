@@ -1,5 +1,7 @@
 #include "KEDemoStates.h"
 #include "KEDemoMachine.h"
+#include "JetsonGPIO.h"
+
 
 #define KNEE 0  // the second joint
 
@@ -243,6 +245,11 @@ void KETorControlDemo::entryCode(void) {
 
     double step2_t = 0;
 
+    int but_pin = 12;
+    //GPIO::setmode(GPIO::BOARD);
+    //GPIO::setup(but_pin, GPIO::IN);
+
+
 }
 void KETorControlDemo::duringCode(void) {
 
@@ -252,6 +259,16 @@ void KETorControlDemo::duringCode(void) {
 
     // Set position
     robot->setJointTorque(targetMotorTor);
+
+    const char *const gpio_estop_pin = "/sys/class/gpio/PQ.05/value";
+    std::ifstream amp(gpio_estop_pin);
+    if (amp.is_open())
+    {
+        int gpio_estop_status; // or perhaps a string?
+        amp >> gpio_estop_status;
+        spdlog::debug("gpio_estop_status: {}", gpio_estop_status);
+    }
+    //int gpio_estop_status = open("/sys/class/gpio/PQ.05/value", O_RDONLY);
 
     //Eigen::VectorXd& motorVel=robot->getVelocity();
     Eigen::VectorXd& ft1_force=robot->getForces(1,1);
