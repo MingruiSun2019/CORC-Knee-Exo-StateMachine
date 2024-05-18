@@ -89,22 +89,33 @@ class KECalibState : public KETimedState {
     bool isCalibDone() {return calibDone;}
 
    private:
-     double stop_reached_time;
-     bool at_stop_step_1 = false;
-     bool at_stop_step_2 = false;
-     bool calibDone=false;
-     bool calibStep1Done = false;
-     bool calibStep2Done = false;
      int calib_step = 0;
-     double step2_t = 0.;
-     double targetSpringPos = -110.;
-     double targetSpringVel = 0.;
-     motorProfile controlMotorProfile = {1000, 10000, 10000};
-    int targetPosStep2Set = 1;
-    double caliStep1MotorPos = 0.0;
-    double targetMotorPos = 0.;
+     double tau = -6.;
+     bool calibDone = false;
+
 };
 
+class KECalibState2 : public KETimedState {
+
+   public:
+    KECalibState2(RobotKE * KE, const char *name = "KE Calib 2 State"):KETimedState(KE, name){};
+
+    void entryCode(void);
+    void duringCode(void);
+    void exitCode(void);
+
+    bool isCalibDone() {return calibDone;}
+
+   private:
+     double stop_reached_time;
+     bool at_stop_step_2 = false;
+     double caliStep1MotorPosScalar = 0.;
+     int targetPosStep2Set = 0;
+     int calib_step = 0;
+     double tau = -6.;
+     bool calibDone = false;
+     motorProfile controlMotorProfile = {1000, 10000, 10000};
+};
 
 /**
  * \brief Provide end-effector mass compensation on KE. Mass is controllable through keyboard inputs.
@@ -121,7 +132,6 @@ class KEMassCompensation : public KETimedState {
 
    private:
      double mass = 0;
-
 };
 
 
@@ -164,7 +174,7 @@ class KEVelControlDemo : public KETimedState {
 class KETorControlDemo : public KETimedState {
 
    public:
-    KETorControlDemo(RobotKE * KE, const char *name = "Velocity Control Demo"):KETimedState(KE, name){};
+    KETorControlDemo(RobotKE * KE, const char *name = "Torque Control Demo"):KETimedState(KE, name){};
 
     void entryCode(void);
     void duringCode(void);
@@ -180,7 +190,7 @@ class KETorControlDemo : public KETimedState {
 class KETorControlForPosDemo : public KETimedState {
 
    public:
-    KETorControlForPosDemo(RobotKE * KE, const char *name = "Velocity Control Demo"):KETimedState(KE, name){};
+    KETorControlForPosDemo(RobotKE * KE, const char *name = "Torque Control for Pos Demo"):KETimedState(KE, name){};
 
     void entryCode(void);
     void duringCode(void);
@@ -192,6 +202,26 @@ class KETorControlForPosDemo : public KETimedState {
      double targetMotorPos = -0.0;
      double targetMotorVel = -0.0;
      double targetMotorAcc = -0.0;
+
+     motorProfile controlMotorProfile = {1000, 1000, 1000};
+};
+
+class KETorControlForSpring : public KETimedState {
+
+   public:
+    KETorControlForSpring(RobotKE * KE, const char *name = "Spring Torque Control Demo"):KETimedState(KE, name){};
+
+    void entryCode(void);
+    void duringCode(void);
+    void exitCode(void);
+
+    private:
+     double state_t = 0.0;
+     double springK = 5.44;
+     double targetSpringTor = 0.;
+     double targetMotorPos = 0.;
+     double targetMotorPosFilt = 0.;
+     double decay = 0.75;
 
      motorProfile controlMotorProfile = {1000, 1000, 1000};
 };

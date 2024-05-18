@@ -43,103 +43,85 @@ void KEDemoState::exitCode(void) {
 
 
 void KECalibState::entryCode(void) {
-    calibDone=false;
-    calibStep1Done = false;
-    calibStep2Done = false;
-
-    stop_reached_time = .0;
-    at_stop_step_1 = false;
-    at_stop_step_2 = false;
-    calib_step = 0;
-    
     robot->decalibrate();
     robot->initTorqueControl();
     robot->printJointStatus();
+
+    //spdlog::debug("Geting FT sensors ID: {}", sensorID);
+    //spdlog::debug("Geting FT sensors Forces: {}", sensorForce[0]);
+
+
     std::cout << "Calibrating (keep clear)..." << std::flush;
 }
 //Move slowly on each joint until max force detected
 void KECalibState::duringCode(void) {
-    double tau = -6;  // the torque to drive the output link to the first stop
-
-    //Apply constant torque (with damping) unless stop has been detected for more than 0.5s
-    Eigen::VectorXd& springVel=robot->getSpringVelocity();
-    Eigen::VectorXd& motorVel=robot->getVelocity();
-    Eigen::VectorXd& springPos=robot->getSpringPosition();
-    spdlog::debug("SpringPos: {}", springPos[KNEE]);
-
-    //double b = 7.;
-    //tau(KNEE) = std::min(std::max(8 - b * vel(i), .0), 8.);
-
-    if (calibStep1Done==false && calibStep2Done==false){
-        // Calibration step 1:
-        // drive the output link to the safety stop
-        robot->setJointTorque(tau);
-        if(iterations()%100==1) {
-            std::cout << "step 1 ..." << std::flush;
-        }
-
-        if(abs(springVel[KNEE])<0.01) {
-            stop_reached_time += dt();
-        }
-        if(stop_reached_time>1.0) {
-            at_stop_step_1=true;
-            stop_reached_time = 0;
-            calib_step = 1;
-            robot->applyCalibration(calib_step);
-            calibStep1Done = true;
-            Eigen::VectorXd& caliStep1MotorPosTemp = robot->getPosition();
-            caliStep1MotorPos = caliStep1MotorPosTemp[KNEE];
-            std::cout << "Calibration step 1 OK." << std::endl;
-            spdlog::debug("Motor Pos Step 1: {}", caliStep1MotorPos);
-
-            controlMotorProfile.profileVelocity = 400;
-            robot->initProfilePositionControl(controlMotorProfile);
-
-            step2_t = 0.0;
-
-        }
-    }
-    else if (calibStep1Done==true && calibStep2Done==false){
-        // Calibration step 2:
-        // drive the output link to the vertical position
-        //spdlog::debug("Step 2 time 1: {}", step2_t);
-        //float actualSpringPos = ((JointKE *)p)->getSpringPosition();
-
-        if (targetPosStep2Set <= 4) {
-            targetMotorPos = caliStep1MotorPos;
-            robot->setJointPosition(targetMotorPos + (110+abs(tau)/5.44)*M_PI/180.);
-            targetPosStep2Set++;
-        }
-
-        if(abs(motorVel[KNEE])<0.01) {
-            stop_reached_time += dt();
-        }
-        if(stop_reached_time > 1.) {
-            at_stop_step_2=true;
-            calib_step = 2;
-            robot->applyCalibration(calib_step);
-            calibStep2Done = true;
-            std::cout << "Calibration step 2 OK." << std::endl;
-        }
-    }
-    else if (calibStep1Done==true && calibStep2Done==true){
-        //Switch to gravity contro when done
-        if(robot->isCalibrated()) {
-            //robot->setEndEffForceWithCompensation(VM3(0,0,0));
-            calibDone=true; //Trigger event
-        }
-    }
-    else {
-        spdlog::debug("Calibration fail, restart.");
-        calibStep1Done = false;
-        calibStep2Done = false;
+    tau = -6;
+    robot->setJointTorque(tau);
+    if(iterations()%100==1) {
+        std::cout << "step 1 ..." << std::flush;
     }
 }
 
 void KECalibState::exitCode(void) {
+    calib_step = 1;
+    robot->applyCalibration(calib_step);
+    Eigen::VectorXd& springPos=robot->getSpringPosition();
+    spdlog::debug("spring pos: {} Calibrated", springPos[0]);
+
+    //Eigen::VectorXd& caliStep1MotorPosTemp = robot->getPosition();
+    //caliStep1MotorPos = caliStep1MotorPosTemp[KNEE];
+    std::cout << "Calibration step 1 OK." << std::endl;
+    //spdlog::debug("Motor Pos Step 1: {}", caliStep1MotorPos);
+}
+
+
+void KECalibState2::entryCode(void) {
+    stop_reached_time = .0;
+    at_stop_step_2 = false;
+    Eigen::VectorXd& caliStep1MotorPos = robot->getPosition();
+    caliStep1MotorPosScalar = caliStep1MotorPos[KNEE];
+    
+    controlMotorProfile.profileVelocity = 400;
+    robot->initProfilePositionControl(controlMotorProfile);
+    std::cout << "Calibrating (keep clear)..." << std::flush;
+
+}
+//Move slowly on each joint until max force detected
+void KECalibState2::duringCode(void) {
+
+    //Apply constant torque (with damping) unless stop has been detected for more than 0.5s
+    //Eigen::VectorXd& springPos=robot->getSpringPosition();
+    //spdlog::debug("SpringPos: {}", springPos[KNEE]);
+    Eigen::VectorXd& motorVel = robot->getVelocity();
+
+    if (targetPosStep2Set <= 6) {
+        if(iterations()%100==1) {
+            robot->setJointPosition(caliStep1MotorPosScalar + (110+abs(tau)/5.44)*M_PI/180.);
+            targetPosStep2Set++;
+        }
+    }
+
+    if(abs(motorVel[KNEE])<0.01) {
+        stop_reached_time += dt();
+    }
+    if(stop_reached_time > 1.) {
+        calib_step = 2;
+        robot->applyCalibration(calib_step);
+
+        if(iterations()%100==1) {
+            std::cout << "Calibration step 2 OK." << std::endl;
+        }
+    }
+    if(robot->isCalibrated()) {
+        calibDone=true; //Trigger event
+    }
+}
+
+void KECalibState2::exitCode(void) {
     //robot->setEndEffForceWithCompensation(VM3(0,0,0));
     ;
 }
+
 
 void KEMassCompensation::entryCode(void) {
     robot->initTorqueControl();
@@ -184,24 +166,28 @@ void KEPosControlDemo::entryCode(void) {
     robot->applyCalibration(2);
 
 
-    robot->initProfilePositionControl(controlMotorProfile);
+    robot->initCyclicPositionControl(controlMotorProfile);
     double step2_t = 0;
 
 }
 void KEPosControlDemo::duringCode(void) {
+    Eigen::VectorXd& springPos=robot->getSpringPosition();
+    Eigen::VectorXd& motorPos=robot->getPosition();
 
     // Calcualte joint reference postion
     step2_t += dt();
-    targetSpringPos = 0.2*sin(0.4*step2_t) * M_PI / 180.0;
+    targetSpringPos = (20.*cos(0.4*step2_t) - 20.) * M_PI / 180.0;
+    //spdlog::debug("spring pos: {}, motor pos: {}, targetPos: {}", springPos[0], motorPos[0], targetSpringPos);
+
 
     // Set position
     robot->setJointPosition(targetSpringPos);
 
-    Eigen::VectorXd& motorVel=robot->getVelocity();
-    spdlog::debug("motorVel: {}", motorVel[KNEE]);
+    //Eigen::VectorXd& motorVel=robot->getVelocity();
+    //spdlog::debug("motorVel: {}", motorVel[KNEE]);
 
     if(iterations()%100==1) {
-        std::cout << "refPos: " << targetSpringPos << std::endl;
+        std::cout << "springPOS: " << springPos[KNEE] << std::endl;
         robot->printStatus();
     }
 }
@@ -248,6 +234,13 @@ void KETorControlDemo::entryCode(void) {
 
     robot->initTorqueControl();
     usleep(10000);
+    robot->stopSensorStreaming();
+    usleep(10000);
+
+    robot->startSensorStreaming();
+
+    robot->sensorCalibration();
+
     double step2_t = 0;
 
 }
@@ -260,11 +253,21 @@ void KETorControlDemo::duringCode(void) {
     // Set position
     robot->setJointTorque(targetMotorTor);
 
-    Eigen::VectorXd& motorVel=robot->getVelocity();
-    spdlog::debug("motorVel: {}", motorVel[KNEE]);
+    //Eigen::VectorXd& motorVel=robot->getVelocity();
+    Eigen::VectorXd& ft1_force=robot->getForces(1,1);
+    Eigen::VectorXd& ft1_torque=robot->getForces(1,2);
+    Eigen::VectorXd& ft2_force=robot->getForces(2,1);
+    Eigen::VectorXd& ft2_torque=robot->getForces(2,2);
 
-    if(iterations()%100==1) {
-        std::cout << "refVel: " << targetMotorTor << std::endl;
+    //spdlog::debug("ftForce: {}", ftForce[0]);
+
+    if(iterations()%10==1) {
+        //std::cout << "refVel: " << targetMotorTor << std::endl;
+        spdlog::debug("ft1_force: {}", ft1_force[0]);
+        spdlog::debug("ft1_torque: {}", ft1_torque[0]);
+        spdlog::debug("ft2_force: {}", ft2_force[0]);
+        spdlog::debug("ft2_torque: {}", ft2_torque[0]);
+
         robot->printStatus();
     }
 }
@@ -302,6 +305,43 @@ void KETorControlForPosDemo::duringCode(void) {
     }
 }
 void KETorControlForPosDemo::exitCode(void) {
+    ;
+    //robot->setPosition(std::vector<double> 0.0);
+}
+
+
+void KETorControlForSpring::entryCode(void) {
+    robot->initCyclicPositionControl(controlMotorProfile);
+    usleep(10000);
+    state_t = 0.;
+    Eigen::VectorXd& springPos=robot->getSpringPosition();
+    Eigen::VectorXd& motorPos=robot->getPosition();
+
+    // Calcualte joint reference postion
+    spdlog::debug("spring pos: {}, motor pos: {}", springPos[0], motorPos[0]);
+
+}
+void KETorControlForSpring::duringCode(void) {
+
+    // Calcualte joint reference postion
+    state_t += dt();
+    targetSpringTor = 3.*sin(0.5*state_t) * M_PI / 180.0;
+    Eigen::VectorXd& springPos=robot->getSpringPosition();
+    Eigen::VectorXd& motorPos=robot->getPosition();
+
+    targetMotorPos = springPos[KNEE] + targetSpringTor / springK;
+    targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    //spdlog::debug("motor pos: {}, spring pos: {}", motorPos[KNEE], springPos[KNEE]);
+
+    // Set position
+    robot->setJointPosition(targetMotorPosFilt);
+
+    if(iterations()%100==1) {
+        std::cout << "refVel: " << targetMotorPosFilt << std::endl;
+        robot->printStatus();
+    }
+}
+void KETorControlForSpring::exitCode(void) {
     ;
     //robot->setPosition(std::vector<double> 0.0);
 }

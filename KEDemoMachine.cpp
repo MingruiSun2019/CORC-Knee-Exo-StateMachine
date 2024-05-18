@@ -3,7 +3,7 @@
 using namespace std;
 
 bool endCalib(StateMachine & sm) {
-    return (sm.state<KECalibState>("CalibState"))->isCalibDone();
+    return (sm.state<KECalibState>("CalibState2"))->isCalibDone();
 }
 
 bool goToNextState(StateMachine & SM) {
@@ -34,22 +34,24 @@ KEDemoMachine::KEDemoMachine() {
     //Create state instances and add to the State Machine
     addState("TestState", std::make_shared<KEDemoState>(robot()));
     addState("CalibState", std::make_shared<KECalibState>(robot()));
+    addState("CalibState2", std::make_shared<KECalibState2>(robot()));
+
     addState("StandbyState", std::make_shared<KEMassCompensation>(robot()));
     addState("PosControlState", std::make_shared<KEPosControlDemo>(robot()));
     addState("VelControlState", std::make_shared<KEVelControlDemo>(robot()));
     addState("TorControlState", std::make_shared<KETorControlDemo>(robot()));
     addState("TorControlForPosState", std::make_shared<KETorControlForPosDemo>(robot()));
-
-
+    addState("TorControlForSpringState", std::make_shared<KETorControlForSpring>(robot()));
 
     //Define transitions between states
-    addTransition("CalibState", &endCalib, "PosControlState");
+    addTransition("CalibState", &goToNextState, "CalibState2");
+    addTransition("CalibState2", &goToNextState, "TorControlForSpringState");
     addTransitionFromLast(&goToNextState, "TorControlState");
     addTransitionFromLast(&goToNextState, "StandbyState");
     addTransitionFromAny(&standby, "StandbyState");
 
     //Initialize the state machine with first state of the designed state machine
-    setInitState("CalibState");
+    setInitState("TorControlState");
 }
 KEDemoMachine::~KEDemoMachine() {
 }
@@ -63,11 +65,14 @@ void KEDemoMachine::init() {
     spdlog::debug("KEDemoMachine::init()");
     if(robot()->initialise()) {
         spdlog::debug("Successfully initialised Step 1");
+        //std::string filename = "logs/xxx.csv"; // grab time and rename file afterwards
         logHelper.initLogger("KEDemoMachineLog", "logs/KEDemoMachine.csv", LogFormat::CSV, true);
         logHelper.add(runningTime(), "Time (s)");
         logHelper.add(robot()->getPosition(), "q");
         logHelper.add(robot()->getVelocity(), "dq");
         logHelper.add(robot()->getTorque(), "tau");
+        logHelper.add(robot()->getSpringPosition(), "springQ");
+
         //logHelper.add(robot()->getEndEffPosition(), "X");
         //logHelper.add(robot()->getEndEffVelocity(), "dX");
         //UIserver = std::make_shared<FLNLHelper>(*robot(), "192.168.7.2");
