@@ -6,6 +6,22 @@ bool endCalib(StateMachine & sm) {
     return (sm.state<KECalibState>("CalibState2"))->isCalibDone();
 }
 
+bool e_stop_handler(StateMachine & sm){
+    const char *const gpio_estop_pin = "/sys/class/gpio/PQ.05/value";
+    std::ifstream e_stop_gpio_file(gpio_estop_pin);
+    if (e_stop_gpio_file.is_open())
+    {
+        int gpio_estop_status; // or perhaps a string?
+        e_stop_gpio_file >> gpio_estop_status;
+        if (gpio_estop_status == 0){
+            spdlog::error("E-stop pressed");
+            std::raise(SIGINT);
+        }
+        return false;
+    }
+    return false;
+}
+
 bool goToNextState(StateMachine & SM) {
     KEDemoMachine & sm = static_cast<KEDemoMachine &>(SM); //Cast to specific StateMachine type
 
@@ -49,6 +65,8 @@ KEDemoMachine::KEDemoMachine() {
     addTransitionFromLast(&goToNextState, "TorControlState");
     addTransitionFromLast(&goToNextState, "StandbyState");
     addTransitionFromAny(&standby, "StandbyState");
+    addTransitionFromAny(&e_stop_handler, "StandbyState");
+
 
     //Initialize the state machine with first state of the designed state machine
     setInitState("TorControlState");
