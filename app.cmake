@@ -6,7 +6,6 @@ set(PLATFORM KneeExo)
 
 ## State machine uses FLNL for network communication
 set(USE_FLNL FALSE)
-set(USE_JETSON TRUE)
 
 ################################################################################
 
