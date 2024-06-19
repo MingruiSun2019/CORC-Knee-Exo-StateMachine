@@ -76,6 +76,7 @@ KEDemoMachine::KEDemoMachine() {
     addState("TestState", std::make_shared<KEDemoState>(robot()));
     addState("CalibState", std::make_shared<KECalibState>(robot()));
     addState("CalibState2", std::make_shared<KECalibState2>(robot()));
+    addState("ZeroLevelForceState", std::make_shared<KEZeroLevelForce>(robot()));
 
     addState("StandbyState", std::make_shared<KEStandByState>(robot()));
     addState("CalibExerRobDriveState", std::make_shared<KECalibExerRobDriveState>(robot()));
@@ -91,11 +92,11 @@ KEDemoMachine::KEDemoMachine() {
 
     //Define transitions between states
     addTransition("CalibState", &goToNextState, "CalibState2");
-    addTransition("CalibState2", &goToNextState, "CalibExerRobDriveState");
+    addTransition("CalibState2", &goToNextState, "ZeroLevelForceState");
+    addTransition("ZeroLevelForceState", &goToNextState, "CalibExerRobDriveState");
     addTransition("CalibExerRobDriveState", &goToNextState, "CalibExerHumDriveState");
     addTransition("CalibExerHumDriveState", &goToNextState, "ActualExerRobDriveState");
     addTransition("ActualExerRobDriveState", &goToNextState, "Sit2StandState");
-
 
     addTransitionFromLast(&goToNextState, "TorControlState");
     addTransitionFromLast(&goToNextState, "StandbyState");

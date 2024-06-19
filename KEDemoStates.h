@@ -16,7 +16,6 @@
 #include "StateMachine.h"
 
 
-
 class KEDemoMachine;
 
 /**
@@ -129,6 +128,77 @@ class KECalibState2 : public KETimedState {
      double tau = -6.;
      bool calibDone = false;
      motorProfile controlMotorProfile = {1000, 10000, 10000};
+};
+
+class KEZeroLevelForce : public KETimedState {
+
+   public:
+    KEZeroLevelForce(RobotKE * KE, const char *name = "KE Zero Level Force State"):KETimedState(KE, name){};
+
+    void entryCode(void);
+    void duringCode(void);
+    void exitCode(void);
+
+   private:
+     bool prev_actionFlag = false;
+     bool action_zero_level = false;
+     bool actionFlag = false;
+     double user_butt_time = 0.;
+     bool user_butt_pressed = false;
+     bool button_released = true;
+
+     bool zeroleveled = true;
+
+     int recording_count = 0;
+
+     double shank_Fx_recording[100] = {0};
+     double shank_Fy_recording[100] = {0};
+     double shank_Fz_recording[100] = {0};
+     double shank_Mx_recording[100] = {0};
+     double shank_My_recording[100] = {0};
+     double shank_Mz_recording[100] = {0};
+     
+     double thigh_Fx_recording[100] = {0};
+     double thigh_Fy_recording[100] = {0};
+     double thigh_Fz_recording[100] = {0};
+     double thigh_Mx_recording[100] = {0};
+     double thigh_My_recording[100] = {0};
+     double thigh_Mz_recording[100] = {0};
+
+     double shank_Fx_Init = 1.;  // todo 
+     double shank_Fy_Init = 2.;
+     double shank_Fz_Init = 3.;
+     double shank_Mx_Init = 4.;
+     double shank_My_Init = 5.;
+     double shank_Mz_Init = 0.;
+
+     double thigh_Fx_Init = 2.;  // todo
+     double thigh_Fy_Init = 4.;
+     double thigh_Fz_Init = 6.;
+     double thigh_Mx_Init = 8.;
+     double thigh_My_Init = 10.;
+     double thigh_Mz_Init = 12.;
+
+     double shank_Fx_Calib = 1.;  // todo 
+     double shank_Fy_Calib = 0.;
+     double shank_Fz_Calib = 0.;
+     double shank_Mx_Calib = 0.;
+     double shank_My_Calib = 0.;
+     double shank_Mz_Calib = 0.;
+
+     double thigh_Fx_Calib = 1.;  // todo
+     double thigh_Fy_Calib = 0.;
+     double thigh_Fz_Calib = 0.;
+     double thigh_Mx_Calib = 0.;
+     double thigh_My_Calib = 0.;
+     double thigh_Mz_Calib = 0.;
+
+     //double thigh_force_offsets_value[] = {thigh_Fx_Calib, thigh_Fy_Calib, thigh_Fz_Calib}; // Your arbitrary values
+     Eigen::VectorXd thigh_force_offsets = Eigen::VectorXd::Zero(3);
+     Eigen::VectorXd thigh_torque_offsets = Eigen::VectorXd::Zero(3);
+     Eigen::VectorXd shank_force_offsets = Eigen::VectorXd::Zero(3);
+     Eigen::VectorXd shank_torque_offsets = Eigen::VectorXd::Zero(3);
+
 };
 
 /**

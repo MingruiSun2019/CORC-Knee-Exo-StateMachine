@@ -13,9 +13,23 @@
 #define IMU_GYRO 1
 #define IMU_ORIEN 2
 
+#define THIGH_FT 1
+#define SHANK_FT 2
+#define FT_FORCE 1
+#define FT_TORQUE 2
+
 #define CALIB_ANGLE_1 110
 
 using namespace std;
+
+double get_mean(double arr[], int n){
+      double sum = 0;
+      for (int i = 0; i < n; i++){
+         sum += arr[i];
+      }
+      return sum / n;
+}
+
 
 double timeval_to_sec(struct timespec *ts)
 {
@@ -173,7 +187,7 @@ void KECalibState2::entryCode(void) {
     Eigen::VectorXd& caliStep1MotorPos = robot->getPosition();
     caliStep1MotorPosScalar = caliStep1MotorPos[KNEE];
     
-    controlMotorProfile.profileVelocity = 400;
+    controlMotorProfile.profileVelocity = 600;
     robot->initProfilePositionControl(controlMotorProfile);
     std::cout << "Calibrating (keep clear)..." << std::flush;
 
@@ -215,6 +229,97 @@ void KECalibState2::exitCode(void) {
     ;
 }
 
+void KEZeroLevelForce::entryCode(void) {
+    robot->startSensorStreaming();
+    std::cout << "Entering Zero level force state, sit with leg straight..." << std::endl;
+}
+//Move slowly on each joint until max force detected
+void KEZeroLevelForce::duringCode(void) {
+    const char *const gpio_button_pin = "/sys/class/gpio/PAC.06/value";  // user button
+    std::ifstream button_gpio_file(gpio_button_pin);
+    if (button_gpio_file.is_open())
+    {
+        int gpio_button_status;
+        button_gpio_file >> gpio_button_status;
+        if (gpio_button_status == 0 && user_butt_pressed == false){
+            user_butt_time += dt();
+            if (user_butt_time > 0.1) {user_butt_pressed = true; user_butt_time = 0.0;}
+        }
+        else if (gpio_button_status == 0 && user_butt_pressed == true && button_released == true) 
+        {actionFlag = 1 - actionFlag; user_butt_pressed = false; button_released = false;}
+        else if (gpio_button_status == 1) {button_released = true;}
+        else ;
+    }
+
+
+    if (actionFlag == true) {
+        Eigen::VectorXd& shankfForces=robot->getForces(SHANK_FT, FT_FORCE);
+        Eigen::VectorXd& shankTorques=robot->getForces(SHANK_FT, FT_TORQUE);
+        Eigen::VectorXd& thighfForces=robot->getForces(THIGH_FT, FT_FORCE);
+        Eigen::VectorXd& thighTorques=robot->getForces(THIGH_FT, FT_TORQUE);
+
+        thigh_Fx_recording[recording_count] = thighfForces[0];
+        thigh_Fy_recording[recording_count] = thighfForces[1];
+        thigh_Fz_recording[recording_count] = thighfForces[2];
+        thigh_Mx_recording[recording_count] = thighTorques[0];
+        thigh_My_recording[recording_count] = thighTorques[1];
+        thigh_Mz_recording[recording_count] = thighTorques[2];
+
+        shank_Fx_recording[recording_count] = shankfForces[0];
+        shank_Fy_recording[recording_count] = shankfForces[1];
+        shank_Fz_recording[recording_count] = shankfForces[2];
+        shank_Mx_recording[recording_count] = shankTorques[0];
+        shank_My_recording[recording_count] = shankTorques[1];
+        shank_Mz_recording[recording_count] = shankTorques[2];
+
+        std::cout << "Thigh Force: " << thighfForces[0] << " Shank Force: " << shankfForces[0] << std::endl;
+        std::cout << "Zero leveling..." << std::endl;
+
+        recording_count++;
+        if (recording_count == 100) {
+            actionFlag = false;
+            zeroleveled = false;
+        }
+    }
+    if (actionFlag == false) {
+        if (zeroleveled == false) {
+            thigh_Fx_Calib = get_mean(thigh_Fx_recording, recording_count) + thigh_Fx_Init;
+            thigh_Fy_Calib = get_mean(thigh_Fy_recording, recording_count) + thigh_Fy_Init;
+            thigh_Fz_Calib = get_mean(thigh_Fz_recording, recording_count) + thigh_Fz_Init;
+            thigh_Mx_Calib = get_mean(thigh_Mx_recording, recording_count) + thigh_Mx_Init;
+            thigh_My_Calib = get_mean(thigh_My_recording, recording_count) + thigh_My_Init;
+            thigh_Mz_Calib = get_mean(thigh_Mz_recording, recording_count) + thigh_Mz_Init;
+
+            shank_Fx_Calib = get_mean(shank_Fx_recording, recording_count) + shank_Fx_Init;
+            shank_Fy_Calib = get_mean(shank_Fy_recording, recording_count) + shank_Fy_Init;
+            shank_Fz_Calib = get_mean(shank_Fz_recording, recording_count) + shank_Fz_Init;
+            shank_Mx_Calib = get_mean(shank_Mx_recording, recording_count) + shank_Mx_Init;
+            shank_My_Calib = get_mean(shank_My_recording, recording_count) + shank_My_Init;
+            shank_Mz_Calib = get_mean(shank_Mz_recording, recording_count) + shank_Mz_Init;
+
+            thigh_force_offsets << thigh_Fx_Calib, thigh_Fy_Calib, thigh_Fz_Calib;
+            thigh_torque_offsets << thigh_Mx_Calib, thigh_My_Calib, thigh_Mz_Calib;
+            shank_force_offsets << shank_Fx_Calib, shank_Fy_Calib, shank_Fz_Calib;
+            shank_torque_offsets << shank_Mx_Calib, shank_My_Calib, shank_Mz_Calib;
+
+            robot->ftsensor1->setOffsets(thigh_force_offsets, thigh_torque_offsets);
+            robot->ftsensor2->setOffsets(shank_force_offsets, shank_torque_offsets);
+            recording_count = 0;
+            std::cout << "Zero Level Finished." << std::endl;  
+            zeroleveled = true;  
+        }
+        else {
+            if(iterations()%100==1) {
+                std::cout << "Sit with leg straight to get ready for force sensor zero level..." << std::endl;
+            }
+        }
+    }
+}
+
+void KEZeroLevelForce::exitCode(void) {
+    //robot->setEndEffForceWithCompensation(VM3(0,0,0));
+    ;
+}
 
 void KEMassCompensation::entryCode(void) {
     robot->initTorqueControl();
@@ -464,10 +569,10 @@ void KETorControlForSpring::exitCode(void) {
 Calibration Exercise Robot Drive
 =============================*/
 void KECalibExerRobDriveState::entryCode(void) {
-    robot->stopSensorStreaming();
-    usleep(10000);
-    robot->startSensorStreaming();
-    robot->sensorCalibration();
+    //robot->stopSensorStreaming();
+    //usleep(10000);
+    //robot->startSensorStreaming();
+    //robot->sensorCalibration();
 
     robot->initCyclicPositionControl(controlMotorProfile);
     usleep(1000);
@@ -559,10 +664,10 @@ void KECalibExerRobDriveState::exitCode(void) {
 Calibration Exercise Human Drive - Robot in Viscous field
 =============================*/
 void KECalibExerHumDriveState::entryCode(void) {
-        robot->stopSensorStreaming();
-    usleep(10000);
-    robot->startSensorStreaming();
-    robot->sensorCalibration();
+    //robot->stopSensorStreaming();
+    //usleep(10000);
+    //robot->startSensorStreaming();
+    //robot->sensorCalibration();
     //robot->initCyclicPositionControl(controlMotorProfile);
     //usleep(100);
     Eigen::VectorXd& springPos=robot->getSpringPosition();
@@ -664,10 +769,10 @@ void KECalibExerHumDriveState::exitCode(void) {
 Actual Exercise Robot in Charge - Robot in Position Control
 =============================*/
 void KEActualExerRobDriveState::entryCode(void) {
-    robot->stopSensorStreaming();
-    usleep(10000);
-    robot->startSensorStreaming();
-    robot->sensorCalibration();
+    //robot->stopSensorStreaming();
+    //usleep(10000);
+    //robot->startSensorStreaming();
+    //robot->sensorCalibration();
     //robot->initProfilePositionControl(controlMotorProfile);
     //usleep(1000);
     //robot->initCyclicPositionControl(controlMotorProfile);
@@ -786,10 +891,10 @@ void KEActualExerRobDriveState::exitCode(void) {
 Actual Exercise Sit to Stand
 =============================*/
 void KETorCtrlSit2Stand::entryCode(void) {
-        robot->stopSensorStreaming();
-    usleep(10000);
-    robot->startSensorStreaming();
-    robot->sensorCalibration();
+    //robot->stopSensorStreaming();
+    //usleep(10000);
+    //robot->startSensorStreaming();
+    //robot->sensorCalibration();
     Eigen::VectorXd& springPos=robot->getSpringPosition();
     targetMotorPosFilt = springPos[KNEE];
     robot->setJointPosition(targetMotorPos);
