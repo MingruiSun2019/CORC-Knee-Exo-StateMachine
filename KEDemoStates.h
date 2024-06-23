@@ -165,28 +165,28 @@ class KEZeroLevelForce : public KETimedState {
      double thigh_My_recording[100] = {0};
      double thigh_Mz_recording[100] = {0};
 
-     double shank_Fx_Init = 1.;  // todo 
-     double shank_Fy_Init = 2.;
-     double shank_Fz_Init = 3.;
-     double shank_Mx_Init = 4.;
-     double shank_My_Init = 5.;
+     double shank_Fx_Init = 0.;  // todo 
+     double shank_Fy_Init = 0.;
+     double shank_Fz_Init = 0.;
+     double shank_Mx_Init = 0.;
+     double shank_My_Init = 0.;
      double shank_Mz_Init = 0.;
 
-     double thigh_Fx_Init = 2.;  // todo
-     double thigh_Fy_Init = 4.;
-     double thigh_Fz_Init = 6.;
-     double thigh_Mx_Init = 8.;
-     double thigh_My_Init = 10.;
-     double thigh_Mz_Init = 12.;
+     double thigh_Fx_Init = 0.;  // todo
+     double thigh_Fy_Init = 0.;
+     double thigh_Fz_Init = 0.;
+     double thigh_Mx_Init = 0.;
+     double thigh_My_Init = 0.;
+     double thigh_Mz_Init = 0.;
 
-     double shank_Fx_Calib = 1.;  // todo 
+     double shank_Fx_Calib = 0.;
      double shank_Fy_Calib = 0.;
      double shank_Fz_Calib = 0.;
      double shank_Mx_Calib = 0.;
      double shank_My_Calib = 0.;
      double shank_Mz_Calib = 0.;
 
-     double thigh_Fx_Calib = 1.;  // todo
+     double thigh_Fx_Calib = 0.;
      double thigh_Fy_Calib = 0.;
      double thigh_Fz_Calib = 0.;
      double thigh_Mx_Calib = 0.;
@@ -301,7 +301,7 @@ class KETorControlForSpring : public KETimedState {
 
     private:
      double state_t = 0.0;
-     double springK = 5.44;
+     double springK = 2.30;
      double targetSpringTor = 0.;
      double targetMotorPos = 0.;
      double targetMotorPosFilt = 0.;
@@ -313,7 +313,7 @@ class KETorControlForSpring : public KETimedState {
 class KECalibExerRobDriveState : public KETimedState {
 
    public:
-    KECalibExerRobDriveState(RobotKE * KE, const char *name = "Sit to Stand Torque Control Demo"):KETimedState(KE, name){};
+    KECalibExerRobDriveState(RobotKE * KE, const char *name = "KECalibExerRobDriveState"):KETimedState(KE, name){};
 
     void entryCode(void);
     void duringCode(void);
@@ -322,7 +322,7 @@ class KECalibExerRobDriveState : public KETimedState {
     private:
      int logger_count = 1;
      double action_t = 0.0;
-     double springK = 5.44 * 180 / M_PI;
+     double springK = 2.30 * 180 / M_PI;
      double targetSpringTor = 0.;
      double targetMotorPos = 0.;
      double targetMotorPosFilt = 0.;
@@ -337,7 +337,7 @@ class KECalibExerRobDriveState : public KETimedState {
      double test_duration = 5.;
      std::vector<std::string> actionText{"No Action", "In Action"};
      std::vector<std::string> angleText{"LowAngle", "HighAngle"};
-     std::vector<std::string> emgText{"Relax", "CoContract"};
+     std::vector<std::string> emgText{"Relax", "Flexion", "Extension", "CoContract"};
 
      LogHelper logHelperSB;
 
@@ -349,7 +349,7 @@ class KECalibExerRobDriveState : public KETimedState {
 class KECalibExerHumDriveState : public KETimedState {
 
    public:
-    KECalibExerHumDriveState(RobotKE * KE, const char *name = "Sit to Stand Torque Control Demo"):KETimedState(KE, name){};
+    KECalibExerHumDriveState(RobotKE * KE, const char *name = "KECalibExerHumDriveState"):KETimedState(KE, name){};
 
     void entryCode(void);
     void duringCode(void);
@@ -358,7 +358,7 @@ class KECalibExerHumDriveState : public KETimedState {
     private:
      int logger_count = 1;
      double action_t = 0.0;
-     double springK = 5.44 * 180 / M_PI;
+     double springK = 2.30 * 180 / M_PI;
      double springVel = 0.;
      double targetTorFilt = 0.;
      double targetSpringTor = 0.;
@@ -394,9 +394,15 @@ class KEActualExerRobDriveState : public KETimedState {
     void exitCode(void);
 
     private:
+     int cycle_count = 0;
+     int num_cycles = 5;
+     int targetPosStep1Set = 0;
+     bool isSet = false;
+     bool isSetHigh = false, isSetLow = true;
+     bool event_trigger = false;
      int logger_count = 1;
      double action_t = 0.0;
-     double springK = 5.44 * 180 / M_PI;
+     double springK = 2.30 * 180 / M_PI;
      double springVel = 0.;
      double targetTorFilt = 0.;
      double targetSpringTor = 0.;
@@ -414,7 +420,7 @@ class KEActualExerRobDriveState : public KETimedState {
      std::string testCondition = "init";
      int freqFlag = 0;
      int resistanceFlag = 0;
-     std::vector<double> freqTable{0.3, 0.7};
+     std::vector<double> freqTable{0.2, 0.4};
      std::vector<std::string> freqText{"SlowMove 0.3Hz", "FastMove 0.7Hz"};
      std::vector<std::string> actionText{"No Action", "In Action"};
      std::vector<std::string> resistanceText{"Relax", "ResistFlexion", "ResistExtension", "Co-Contraction"};
@@ -438,7 +444,7 @@ class KETorCtrlSit2Stand : public KETimedState {
     private:
      int logger_count = 1;
      double action_t = 0.0;
-     double springK = 5.44 * 180 / M_PI;
+     double springK = 2.30 * 180 / M_PI;
      double targetSpringTor = 0.;
      double targetTorFilt = 0.;
      double targetMotorPos = 0.;
@@ -453,13 +459,13 @@ class KETorCtrlSit2Stand : public KETimedState {
 
      std::vector<double> assistanceLevel{10., 20.};
      std::vector<std::string> actionText{"No Action", "In Action"};
-     std::vector<std::string> assistanceText{"AssistLevel 10Nm", "AssistLevel 20Nm"};
+     std::vector<std::string> assistanceText{"AssistLevel 15Nm", "AssistLevel 30Nm"};
 
      LogHelper logHelperSB;
 
      motorProfile controlMotorProfile = {1000, 1000, 1000};     
      std::vector<double> sit2stdAngSmp{-110., -100., -80., -60., -40., -20., 0.};
-     std::vector<double> sit2stdTorProfile_40{0.07,0.1,0.28,0.24,0.1,0.02,0.02};
+     std::vector<double> sit2stdTorProfile_40{0.07*3.57,0.1*3.57,0.28*3.57,0.24*3.57,0.1*3.57,0.02*3.57,0.02*3.57};  //raw data from the graph scale *3.57 to 1.
 
      void initLoggerStandard(std::string testCondition); 
 };

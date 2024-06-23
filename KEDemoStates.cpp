@@ -18,9 +18,76 @@
 #define FT_FORCE 1
 #define FT_TORQUE 2
 
+#define MAX_TORQUE_LEVEL 24
+#define UPPER_ANGLE_LIMIT -23
+#define LOWER_ANGLE_LIMIT -73
+#define DISPLAY_DOWNSAMPLE_FACTOR 10
+#define PROGRESS_BAR_WIDTH 50
+
+#define KEYCODE_J 106
+#define KEYCODE_K 107
+
+#define POS_INCRE_MAX 0.4  //  higher than this will cause overvoltage, 0.4 is roughly 4000inc at the motor with 144 ratio and 4096 motor encoder resolution
+
 #define CALIB_ANGLE_1 110
 
 using namespace std;
+
+double motorPosForTrans = 0.;
+
+
+void saveValues(float values[], int num_values, const std::string& filename) {
+    std::cout << "saving parameters to file..." << std::endl;
+    std::ofstream outFile(filename);
+    if (outFile.is_open()) {
+        for (int i = 0; i < num_values; i++) {
+            if (i == num_values - 1) {
+                outFile << values[i];
+            } else {
+                outFile << values[i] << ",";
+            }
+        }
+        outFile << std::endl;
+        outFile.close();
+    } else {
+        std::cerr << "Unable to open file for writing" << std::endl;
+    }
+    std::cout << "saving parameters to file finished." << std::endl;
+}
+
+void sav_temp_params_to_file(RobotKE* robot) {
+    int num_params = 14;
+    float temp_vals[num_params] = {0};
+
+    Eigen::VectorXd& motorPos = robot->getPosition();
+    Eigen::VectorXd& springPos= robot->getSpringPosition();
+    temp_vals[0] = motorPos[KNEE];
+    temp_vals[1] = springPos[KNEE];
+
+    float ft1_forceOffsets[3] = {0};
+    float ft1_torqueOffsets[3] = {0};
+    float ft2_forceOffsets[3] = {0};
+    float ft2_torqueOffsets[3] = {0};
+
+    robot->ftsensor1->getOffsets(ft1_forceOffsets, ft1_torqueOffsets);
+    robot->ftsensor2->getOffsets(ft2_forceOffsets, ft2_torqueOffsets);
+
+    temp_vals[2] = ft1_forceOffsets[0];
+    temp_vals[3] = ft1_forceOffsets[1];
+    temp_vals[4] = ft1_forceOffsets[2];
+    temp_vals[5] = ft1_torqueOffsets[0];
+    temp_vals[6] = ft1_torqueOffsets[1];
+    temp_vals[7] = ft1_torqueOffsets[2];
+    temp_vals[8] = ft2_forceOffsets[0];
+    temp_vals[9] = ft2_forceOffsets[1];
+    temp_vals[10] = ft2_forceOffsets[2];
+    temp_vals[11] = ft2_torqueOffsets[0];
+    temp_vals[12] = ft2_torqueOffsets[1];
+    temp_vals[13] = ft2_torqueOffsets[2];
+
+    std::string filename = "logs/onRunningParams.csv";
+    saveValues(temp_vals, num_params, filename);
+}
 
 double get_mean(double arr[], int n){
       double sum = 0;
@@ -28,6 +95,16 @@ double get_mean(double arr[], int n){
          sum += arr[i];
       }
       return sum / n;
+}
+
+void draw_progress_bar(std::string left_text, std::string right_text, float value, float value_min, float value_max, int bar_width) {
+    std::cout << left_text;
+    int progress = (value * (float)bar_width) / (value_max - value_min);
+    for (int i = 1; i <= bar_width; i++) {
+        if (i <= progress) std::cout << "+";
+        else std::cout << "-";
+    }
+    std::cout << right_text<< std::endl;
 }
 
 
@@ -200,8 +277,8 @@ void KECalibState2::duringCode(void) {
     //spdlog::debug("SpringPos: {}", springPos[KNEE]);
     Eigen::VectorXd& motorVel = robot->getVelocity();
 
-    if (targetPosStep2Set <= 6) {
-        if(iterations()%10==1) {
+    if (targetPosStep2Set <= 4) {
+        if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
             robot->setJointPosition(caliStep1MotorPosScalar + (CALIB_ANGLE_1+abs(tau)/5.44)*M_PI/180.);
             targetPosStep2Set++;
         }
@@ -272,8 +349,10 @@ void KEZeroLevelForce::duringCode(void) {
         shank_My_recording[recording_count] = shankTorques[1];
         shank_Mz_recording[recording_count] = shankTorques[2];
 
-        std::cout << "Thigh Force: " << thighfForces[0] << " Shank Force: " << shankfForces[0] << std::endl;
-        std::cout << "Zero leveling..." << std::endl;
+        //std::cout << "Thigh Force: " << thighfForces[0] << " Shank Force: " << shankfForces[0] << std::endl;
+        if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
+            std::cout << "Zero leveling..." << std::endl;
+        }
 
         recording_count++;
         if (recording_count == 100) {
@@ -310,7 +389,7 @@ void KEZeroLevelForce::duringCode(void) {
         }
         else {
             if(iterations()%100==1) {
-                std::cout << "Sit with leg straight to get ready for force sensor zero level..." << std::endl;
+                std::cout << "Stand with leg straight to get ready for force sensor zero level..." << std::endl;
             }
         }
     }
@@ -318,7 +397,8 @@ void KEZeroLevelForce::duringCode(void) {
 
 void KEZeroLevelForce::exitCode(void) {
     //robot->setEndEffForceWithCompensation(VM3(0,0,0));
-    ;
+    Eigen::VectorXd& motorPos=robot->getPosition();
+    motorPosForTrans = motorPos[KNEE];
 }
 
 void KEMassCompensation::entryCode(void) {
@@ -478,7 +558,7 @@ void KETorControlDemo::duringCode(void) {
 
     //spdlog::debug("ftForce: {}", ftForce[0]);
 
-    if(iterations()%10==1) {
+    if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
         //std::cout << "refVel: " << targetMotorTor << std::endl;
         spdlog::debug("ft1_force: {}", ft1_force[0]);
         spdlog::debug("ft1_torque: {}", ft1_torque[0]);
@@ -548,8 +628,13 @@ void KETorControlForSpring::duringCode(void) {
     Eigen::VectorXd& motorPos=robot->getPosition();
 
     targetMotorPos = springPos[KNEE] + targetSpringTor / springK;
-    targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+
+        double targetMotorPosFiltTemp = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    targetMotorPosFilt = targetMotorPosFilt + std::min(std::max(targetMotorPosFiltTemp - targetMotorPosFilt, -POS_INCRE_MAX), POS_INCRE_MAX);
+    //targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
     //spdlog::debug("motor pos: {}, spring pos: {}", motorPos[KNEE], springPos[KNEE]);
+        //spdlog::debug("motor pos: {}, spring pos: {}", targetMotorPosFilt, springPos[KNEE]);
+
 
     // Set position
     robot->setJointPosition(targetMotorPosFilt);
@@ -576,9 +661,7 @@ void KECalibExerRobDriveState::entryCode(void) {
 
     robot->initCyclicPositionControl(controlMotorProfile);
     usleep(1000);
-    Eigen::VectorXd& springPos=robot->getSpringPosition();
-    targetMotorPosFilt = springPos[KNEE];
-    robot->setJointPosition(targetMotorPos);
+    targetMotorPosFilt = motorPosForTrans;
     action_t = 0.;
 }
 void KECalibExerRobDriveState::duringCode(void) {
@@ -603,7 +686,15 @@ void KECalibExerRobDriveState::duringCode(void) {
     }
 
     if (robot->keyboard->getW()==1) angleFlag = 1 - angleFlag;  // toggle between 1 and 2
-    if (robot->keyboard->getD()==1) emgFlag = 1 - emgFlag;  // toggle between 1 and 2
+    if (robot->keyboard->getD()==1) {
+        emgFlag++; 
+        if (emgFlag >= 4) emgFlag = 0;  // toggle between 0,1,2,3
+    }
+    if (robot->keyboard->getKeyCode() == KEYCODE_J) {
+        sav_temp_params_to_file(robot);
+    }
+
+
     testCondition = angleText[angleFlag] + emgText[emgFlag];
 
     if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
@@ -615,13 +706,16 @@ void KECalibExerRobDriveState::duringCode(void) {
     if (actionFlag == false) {targetSpringTor = 0;}
     else if (action_t < test_duration) {
         action_t += dt();
-        targetSpringTor = 20.*sin(0.2*2*M_PI*action_t);
+        targetSpringTor = MAX_TORQUE_LEVEL*sin(0.2*2*M_PI*action_t);
     }
     else {targetSpringTor = 0; actionFlag=false;}
 
     targetMotorPos = springPos[KNEE] + targetSpringTor / springK;
-    targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
-    //spdlog::debug("motor pos: {}, spring pos: {}", motorPos[KNEE], springPos[KNEE]);
+
+    double targetMotorPosFiltTemp = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    targetMotorPosFilt = targetMotorPosFilt + std::min(std::max(targetMotorPosFiltTemp - targetMotorPosFilt, -POS_INCRE_MAX), POS_INCRE_MAX);
+    //targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    //spdlog::debug("motor pos: {}, spring pos: {}", targetMotorPosFilt, springPos[KNEE]);
 
     // Set position
     robot->setJointPosition(targetMotorPosFilt);
@@ -632,26 +726,19 @@ void KECalibExerRobDriveState::duringCode(void) {
 
     std::time_t result = std::time(nullptr);
 
-    if(iterations()%5==1) {
-        //std::cout << "action Flag: " << actionFlag << "action_time: " << action_t << std::endl;
-        //std::cout << "targetMotorPos: " << targetMotorPos*180./M_PI << "  targetMotorPosFilt: " << targetMotorPosFilt*180./M_PI << std::endl;
-        //std::cout << "Knee Angle: " << kneeAngle << "  Knee Angle Mot: " << kneeAngleMot << std::endl;
-        //std::cout << "Target Torque: " << targetSpringTor << std::endl;
-        //std::cout << std::asctime(std::localtime(&result));
+    if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
         if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
             std::cout << "RECORDING ";
         }
-        std::cout << "Calib Rob Drive " << angleText[angleFlag] << ", " << emgText[emgFlag] << ", "
-          << actionText[actionFlag] << " Time: 0s ||";
-        for (int i=1; i<=50; i++) {
-            if (action_t*10 < i) std::cout << "+";
-            else std::cout << "-";
-        }
-        std::cout << "|| 5s" << std::endl;
+        std::string left_str = "Calib Rob Drive " + angleText[angleFlag] + ", " + emgText[emgFlag] + ", " + actionText[actionFlag] + " Time: 0s ||";
+        std::string right_str = "|| 5s";
+        float text_duration = 5;
+        draw_progress_bar(left_str, right_str, action_t, 0, test_duration, PROGRESS_BAR_WIDTH);
     }
 }
 void KECalibExerRobDriveState::exitCode(void) {
-    ;
+    Eigen::VectorXd& motorPos=robot->getPosition();
+    motorPosForTrans = motorPos[KNEE];
     //Eigen::VectorXd& springPos=robot->getSpringPosition();
     //double targetMotorPos = springPos[KNEE];
     //robot->setJointPosition(targetMotorPos);
@@ -670,9 +757,8 @@ void KECalibExerHumDriveState::entryCode(void) {
     //robot->sensorCalibration();
     //robot->initCyclicPositionControl(controlMotorProfile);
     //usleep(100);
-    Eigen::VectorXd& springPos=robot->getSpringPosition();
-    targetMotorPosFilt = springPos[KNEE];
-    robot->setJointPosition(targetMotorPos);
+    targetMotorPosFilt = motorPosForTrans;
+
     action_t = 0.;
 }
 void KECalibExerHumDriveState::duringCode(void) {
@@ -716,13 +802,18 @@ void KECalibExerHumDriveState::duringCode(void) {
         else if (inFlexing == 0 && kneeAngle > -20) inFlexing = 1;
 
         if (inFlexing == 1) targetSpringTor = 5 * resistanceFlag;
-        else targetSpringTor = -5 * resistanceFlag;
+        else targetSpringTor = -MAX_TORQUE_LEVEL/4. * resistanceFlag;
     }
 
     targetTorFilt = targetTorFilt + 0.03 * (targetSpringTor - targetTorFilt);  // smooth the torque in transition
     targetMotorPos = springPos[KNEE] + targetTorFilt / springK;
-    targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+
+    double targetMotorPosFiltTemp = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    targetMotorPosFilt = targetMotorPosFilt + std::min(std::max(targetMotorPosFiltTemp - targetMotorPosFilt, -POS_INCRE_MAX), POS_INCRE_MAX);
+    //targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
     //spdlog::debug("motor pos: {}, spring pos: {}", motorPos[KNEE], springPos[KNEE]);
+    //spdlog::debug("motor pos: {}, spring pos: {}", targetMotorPosFilt, springPos[KNEE]);
+
 
     // Set position
     robot->setJointPosition(targetMotorPosFilt);
@@ -731,7 +822,7 @@ void KECalibExerHumDriveState::duringCode(void) {
         logHelperSB.recordLogData();
     }
 
-    if(iterations()%5==1) {
+    if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
         //std::cout << "action Flag: " << actionFlag << "action_time: " << action_t << std::endl;
         //std::cout << "springVel: " << springVel << "  targetMotorPosFilt: " << targetMotorPosFilt*180./M_PI << std::endl;
         //std::cout << "Knee Angle: " << kneeAngle << "  Knee Angle Mot: " << kneeAngleMot << std::endl;
@@ -742,24 +833,35 @@ void KECalibExerHumDriveState::duringCode(void) {
         }
         std::cout << "Calib Hum Drive " << resistanceText[resistanceFlag-1] << ", " << modeText[inFlexing] << ", "
           << actionText[actionFlag] << " -78deg ||";
+        
+        std::string left_str = "Calib Hum Drive " + resistanceText[resistanceFlag-1] + ", " + modeText[inFlexing] + ", " + actionText[actionFlag] + " -78deg ||";
+        std::string right_str = "|| " + std::to_string(UPPER_ANGLE_LIMIT) + "deg";
+        draw_progress_bar("||", "||", kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
         if (inFlexing) {
+            draw_progress_bar(left_str, right_str, kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
+            /*
             for (int i=-78; i<-18; i++) {
                 if (kneeAngle > i) std::cout << "-";
                 else std::cout << "+";
             }
+            */
         }
         else {
+            draw_progress_bar(left_str, right_str, kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
+            /*
             std::cout << "|";
             for (int i=-78; i<-18; i++) {
                 if (kneeAngle > i) std::cout << "+";
                 else std::cout << "-";
             }
+            */
         }
-        std::cout << "|| -18deg" << std::endl;
+        //std::cout << "|| -18deg" << std::endl;
     }
 }
 void KECalibExerHumDriveState::exitCode(void) {
-    ;
+    Eigen::VectorXd& motorPos=robot->getPosition();
+    motorPosForTrans = motorPos[KNEE];
     //robot->initProfilePositionControl(controlMotorProfile);
     //usleep(10000);
     //robot->setPosition(std::vector<double> 0.0);
@@ -773,16 +875,18 @@ void KEActualExerRobDriveState::entryCode(void) {
     //usleep(10000);
     //robot->startSensorStreaming();
     //robot->sensorCalibration();
-    //robot->initProfilePositionControl(controlMotorProfile);
+    //robot->initCyclicVelocityControl(controlMotorProfile);
     //usleep(1000);
-    //robot->initCyclicPositionControl(controlMotorProfile);
-    //usleep(1000);
-    Eigen::VectorXd& springPos=robot->getSpringPosition();
-    targetMotorPosFilt = springPos[KNEE];
-    robot->setJointPosition(targetMotorPos);
+    robot->initProfilePositionControl(controlMotorProfile);
+    usleep(1000);
+    targetMotorPosFilt = motorPosForTrans;
+
     action_t = 0.;
 }
 void KEActualExerRobDriveState::duringCode(void) {
+
+    sineFreq = freqTable[freqFlag];
+    test_duration = num_cycles / sineFreq;  // 5 cycles
 
     Eigen::VectorXd& springPos=robot->getSpringPosition();
     Eigen::VectorXd& motorPos=robot->getPosition();
@@ -799,7 +903,7 @@ void KEActualExerRobDriveState::duringCode(void) {
             if (user_butt_time > 0.1) {user_butt_pressed = true; user_butt_time = 0.0;}
         }
         else if (gpio_button_status == 0 && user_butt_pressed == true && button_released == true) 
-        {actionFlag = 1 - actionFlag; action_t = 0.; user_butt_pressed = false; button_released = false;}
+        {actionFlag = 1 - actionFlag; action_t = test_duration / num_cycles - 0.1; user_butt_pressed = false; button_released = false;}
         else if (gpio_button_status == 1) {button_released = true;}
         else ;
     }
@@ -810,10 +914,17 @@ void KEActualExerRobDriveState::duringCode(void) {
     }
     if (robot->keyboard->getD()==1) {
         freqFlag = 1 - freqFlag;  // toggle between 0 and 1
+        if (freqFlag == 0) {
+            controlMotorProfile.profileVelocity = 200;
+        }
+        else {
+            controlMotorProfile.profileVelocity = 1500;
+        }
+        robot->initProfilePositionControl(controlMotorProfile);
     }
     
-    test_duration = 5 / sineFreq;  // 5 cycles
     sineFreq = freqTable[freqFlag];
+    test_duration = num_cycles / sineFreq;  // 5 cycles
     testCondition = freqText[freqFlag] + resistanceText[resistanceFlag];
 
     if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
@@ -824,30 +935,113 @@ void KEActualExerRobDriveState::duringCode(void) {
 
     //springVelFilt = springVelFilt + (1.0-decay) * (springVelVec[KNEE] - springVelFilt);
     if (actionFlag == false) {
-        double tarTorq = -78. - kneeAngle;  // go to 78 with propotional torque control
-        tarTorq = std::min(std::max(tarTorq, -10.), 10.);
-        targetTorFilt = targetTorFilt + 0.5 * (tarTorq - targetTorFilt);  // smooth the torque in transition
-        targetMotorPos = springPos[KNEE] + targetTorFilt / springK;
+        cycle_count = 0;
+        isSet = false;
+        if (isSet == false) {
+            if (targetPosStep1Set <= 4) {
+                if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
+                    robot->setJointPosition(-78* M_PI / 180);
+                    targetPosStep1Set++;
+                }
+            }
+            else {
+                isSet = true;
+                targetPosStep1Set = 0;
+            }
+            //targetMotorPos = -78.* M_PI / 180;
+        }
+        //double tarTorq = -78. - kneeAngle;  // go to 78 with propotional torque control
+        //tarTorq = std::min(std::max(tarTorq, -10.), 10.);
+        //targetTorFilt = targetTorFilt + 0.5 * (tarTorq - targetTorFilt);  // smooth the torque in transition
+        //targetMotorPos = springPos[KNEE] + targetTorFilt / springK;
     }
-    else if (action_t < test_duration) {
+    else if (cycle_count < num_cycles*2+2) {
+        isSet = false;
         action_t += dt();
-        targetMotorPos = (-48-30*cos(2*M_PI*sineFreq*action_t)) * M_PI / 180;
+        if (action_t > (test_duration / num_cycles)){
+            event_trigger = true;
+            action_t = 0.0;
+            cycle_count++;
+            
+        }
+        //targetMotorPos = (-48-30*cos(2*M_PI*sineFreq*action_t)) * M_PI / 180;
+
+        if (event_trigger == true){
+            if (isSetHigh == false && isSetLow == true) {
+                if (targetPosStep1Set <= 4) {
+                    if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
+                        robot->setJointPosition(-18* M_PI / 180);
+                        targetPosStep1Set++;
+                        spdlog::debug("Setting High: {}", cycle_count);
+                    }
+                }
+                else {
+                    isSetHigh = true;
+                    isSetLow = false;
+                    event_trigger = false;
+                    targetPosStep1Set = 0;
+                }
+            }
+            if (isSetHigh == true && isSetLow == false) {
+                if (targetPosStep1Set <= 4) {
+                    if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
+                        robot->setJointPosition(-78* M_PI / 180);
+                        targetPosStep1Set++;
+                        spdlog::debug("Setting Low");
+                    }
+                }
+                else {
+                    isSetHigh = false;
+                    isSetLow = true;
+                    event_trigger = false;
+                    targetPosStep1Set = 0;
+                }
+            }
+        }
     }
-    else targetMotorPos = -78.* M_PI / 180;
 
+        //double tarTorq = targetMotorPosTemp - kneeAngle;  // go to 78 with propotional torque control
+        //tarTorq = std::min(std::max(tarTorq, -20.), 20.);
+        //targetTorFilt = targetTorFilt + 0.5 * (tarTorq - targetTorFilt);  // smooth the torque in transition
+        //targetMotorPos = springPos[KNEE] + targetTorFilt / springK;
+    else 
+    {
+        isSet = false;
+        if (isSet == false) {
+            if (targetPosStep1Set <= 4) {
+                if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
+                    robot->setJointPosition(-78* M_PI / 180);
+                    targetPosStep1Set++;
+                }
+            }
+            else {
+                isSet = true;
+                targetPosStep1Set = 0;
+            }
+            //targetMotorPos = -78.* M_PI / 180;
+        }
+    }
 
-    targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    //double prev_tarPos = targetMotorPosFilt;
+    //double targetMotorPosFiltTemp = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    //targetMotorPosFilt = targetMotorPosFilt + std::min(std::max(targetMotorPosFiltTemp - targetMotorPosFilt, -POS_INCRE_MAX), POS_INCRE_MAX);
+    
+    //targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
     //spdlog::debug("motor pos: {}, spring pos: {}", motorPos[KNEE], springPos[KNEE]);
+    //spdlog::debug("motor pos: {}, spring pos: {}", targetMotorPosFilt, springPos[KNEE]);
+
 
     // Set position
-    robot->setJointPosition(targetMotorPosFilt);
+    //double targetVel = (targetMotorPosFilt - prev_tarPos) / dt();
+    //robot->applyMotorPosition(targetMotorPosFilt, targetVel);
+    //robot->setJointPosition(targetMotorPosFilt);
     if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
         logHelperSB.recordLogData();
     }
 
     double measuredTorq =  (motorPos[KNEE] - springPos[KNEE]) * springK;
 
-    if(iterations()%5==1) {
+    if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
         //std::cout << "action Flag: " << actionFlag << "action_time: " << action_t << std::endl;
         //std::cout << "test_duration: " << test_duration << "  action_t: " << action_t << std::endl;
         //std::cout << "Knee Angle: " << kneeAngle << "  Knee Angle Mot: " << kneeAngleMot << std::endl;
@@ -856,33 +1050,34 @@ void KEActualExerRobDriveState::duringCode(void) {
             std::cout << "RECORDING ";
         }
         std::cout << "Exercise Robot in Charge " << freqText[freqFlag] << ", " << resistanceText[resistanceFlag] << ", "
-          << actionText[actionFlag] << "Torque -20Nm ||";
+          << actionText[actionFlag] << " -24Nm ||";
         if (measuredTorq > 0) {
-            for (int i=40; i>0; i--) {
+            for (int i=2*MAX_TORQUE_LEVEL; i>0; i--) {
                 std::cout << "-";
             }
             std::cout << "|";
-            for (int i=0; i<40; i++) {
+            for (int i=0; i<2*MAX_TORQUE_LEVEL; i++) {
                 if ((measuredTorq*2) > i) std::cout << "+";
                 else std::cout << "-";
             }
         }
         else {
-            for (int i=-40; i<0; i++) {
+            for (int i=-2*MAX_TORQUE_LEVEL; i<0; i++) {
                 if ((measuredTorq*2) > i) std::cout << "-";
                 else std::cout << "+";
             }
             std::cout << "|";
-            for (int i=40; i>0; i--) {
+            for (int i=60; i>0; i--) {
                 std::cout << "-";
             }
         }
-        std::cout << "|| 20Nm" << std::endl;
+        std::cout << "|| 24Nm" << std::endl;
 
     }
 }
 void KEActualExerRobDriveState::exitCode(void) {
-    ;
+    Eigen::VectorXd& motorPos=robot->getPosition();
+    motorPosForTrans = motorPos[KNEE];
     //robot->setPosition(std::vector<double> 0.0);
 }
 
@@ -895,9 +1090,11 @@ void KETorCtrlSit2Stand::entryCode(void) {
     //usleep(10000);
     //robot->startSensorStreaming();
     //robot->sensorCalibration();
-    Eigen::VectorXd& springPos=robot->getSpringPosition();
-    targetMotorPosFilt = springPos[KNEE];
-    robot->setJointPosition(targetMotorPos);
+    robot->initCyclicPositionControl(controlMotorProfile);
+    usleep(10000);
+
+    targetMotorPosFilt = motorPosForTrans;
+
     action_t = 0.;
 }
 void KETorCtrlSit2Stand::duringCode(void) {
@@ -952,16 +1149,23 @@ void KETorCtrlSit2Stand::duringCode(void) {
             t = (kneeAngle - sit2stdAngSmp[i]) / (sit2stdAngSmp[i+1] - sit2stdAngSmp[i]);
             targetSpringTor = sit2stdTorProfile_40[i] + t * (sit2stdTorProfile_40[i+1] - sit2stdTorProfile_40[i]);
         }
-        targetSpringTor = targetSpringTor * 3.6 * assistanceLevel[assistanceFlag];  // change to body weight x assistance level
+        targetSpringTor = targetSpringTor * MAX_TORQUE_LEVEL /10. * assistanceLevel[assistanceFlag];  // change to body weight x assistance level
     }
     else {
         targetSpringTor = 0;
     }
 
-    targetTorFilt = targetTorFilt + 0.2 * (targetSpringTor - targetTorFilt);  // smooth the torque in transition
+
+    //targetTorFilt = targetTorFilt + 0.95 * (targetSpringTor - targetTorFilt);  // smooth the torque in transition
+    targetTorFilt = targetSpringTor;
     targetMotorPos = springPos[KNEE] + targetTorFilt / springK;
+
+    //double targetMotorPosFiltTemp = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    //targetMotorPosFilt = targetMotorPosFilt + std::min(std::max(targetMotorPosFiltTemp - targetMotorPosFilt, -POS_INCRE_MAX), POS_INCRE_MAX);
     targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
     //spdlog::debug("motor pos: {}, spring pos: {}", motorPos[KNEE], springPos[KNEE]);
+    //spdlog::debug("motor pos: {}, spring pos: {}", targetMotorPosFilt, springPos[KNEE]);
+
 
     // Set position
     robot->setJointPosition(targetMotorPosFilt);
@@ -969,7 +1173,7 @@ void KETorCtrlSit2Stand::duringCode(void) {
         logHelperSB.recordLogData();
     }
 
-    if(iterations()%10==1) {
+    if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
         //std::cout << "Stand flag : " << actionFlag << std::endl;
         //std::cout << "targetMotorPos: " << targetMotorPos*180./M_PI << "  targetMotorPosFilt: " << targetMotorPosFilt*180./M_PI << std::endl;
         //std::cout << "Knee Angle: " << kneeAngle << "  Knee Angle Mot: " << kneeAngleMot << std::endl;
@@ -987,7 +1191,9 @@ void KETorCtrlSit2Stand::duringCode(void) {
     }
 }
 void KETorCtrlSit2Stand::exitCode(void) {
-    logHelperSB.endLog();
+    Eigen::VectorXd& motorPos=robot->getPosition();
+    motorPosForTrans = motorPos[KNEE];
+    //logHelperSB.endLog();
     //robot->setPosition(std::vector<double> 0.0);
 }
 
