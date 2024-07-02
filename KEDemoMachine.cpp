@@ -42,6 +42,19 @@ bool goToNextState(StateMachine & SM) {
     return false;
 }
 
+bool goSkipCalibState(StateMachine & SM) {
+    KEDemoMachine & sm = static_cast<KEDemoMachine &>(SM); //Cast to specific StateMachine type
+
+    //keyboard or joystick press
+    if ( sm.robot()->keyboard->getW()==1) {
+        sm.robot()->needCalib = false;
+        return true;
+    }
+
+    //Otherwise false
+    return false;
+}
+
 bool standby(StateMachine & SM) {
     KEDemoMachine & sm = (KEDemoMachine &)SM; //Cast to specific StateMachine type
 
@@ -74,6 +87,7 @@ KEDemoMachine::KEDemoMachine() {
 
     //Create state instances and add to the State Machine
     addState("TestState", std::make_shared<KEDemoState>(robot()));
+    addState("InitState", std::make_shared<KEInitState>(robot()));
     addState("CalibState", std::make_shared<KECalibState>(robot()));
     addState("CalibState2", std::make_shared<KECalibState2>(robot()));
     addState("ZeroLevelForceState", std::make_shared<KEZeroLevelForce>(robot()));
@@ -91,6 +105,8 @@ KEDemoMachine::KEDemoMachine() {
     addState("Sit2StandState", std::make_shared<KETorCtrlSit2Stand>(robot()));
 
     //Define transitions between states
+    addTransition("InitState", &goSkipCalibState, "CalibExerRobDriveState");
+    addTransition("InitState", &goToNextState, "CalibState");
     addTransition("CalibState", &goToNextState, "CalibState2");
     addTransition("CalibState2", &goToNextState, "ZeroLevelForceState");
     addTransition("ZeroLevelForceState", &goToNextState, "CalibExerRobDriveState");
@@ -119,7 +135,7 @@ KEDemoMachine::KEDemoMachine() {
 
 
     //Initialize the state machine with first state of the designed state machine
-    setInitState("CalibState");
+    setInitState("InitState");
 }
 KEDemoMachine::~KEDemoMachine() {
 }

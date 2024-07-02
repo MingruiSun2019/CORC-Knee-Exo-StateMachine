@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <iostream>
 #include <ctime>
-
+#include <random>
 
 #define KNEE 0  // the second joint
 #define IMU_ID0 0
@@ -19,7 +19,7 @@
 #define FT_TORQUE 2
 
 #define MAX_TORQUE_LEVEL 24
-#define UPPER_ANGLE_LIMIT -23
+#define UPPER_ANGLE_LIMIT -30
 #define LOWER_ANGLE_LIMIT -73
 #define DISPLAY_DOWNSAMPLE_FACTOR 10
 #define PROGRESS_BAR_WIDTH 50
@@ -34,7 +34,22 @@
 using namespace std;
 
 double motorPosForTrans = 0.;
+bool calibFlag = false;
 
+// Function to generate a randomized array of 5 elements 0, 1, 2, 3, 4
+std::vector<int> getRandomizedArray() {
+    // Initialize the array with elements 0, 1, 2, 3, 4
+    std::vector<int> arr = {0, 1, 2, 3, 4};
+
+    // Create a random device and use it to seed the random number generator
+    std::random_device rd;
+    std::mt19937 g(rd());
+
+    // Shuffle the array
+    std::shuffle(arr.begin(), arr.end(), g);
+
+    return arr;
+}
 
 void saveValues(float values[], int num_values, const std::string& filename) {
     std::cout << "saving parameters to file..." << std::endl;
@@ -55,7 +70,7 @@ void saveValues(float values[], int num_values, const std::string& filename) {
     std::cout << "saving parameters to file finished." << std::endl;
 }
 
-void sav_temp_params_to_file(RobotKE* robot) {
+void save_temp_params_to_file(RobotKE* robot) {
     int num_params = 14;
     float temp_vals[num_params] = {0};
 
@@ -88,6 +103,37 @@ void sav_temp_params_to_file(RobotKE* robot) {
     std::string filename = "logs/onRunningParams.csv";
     saveValues(temp_vals, num_params, filename);
 }
+
+void loadValues(double temp_vals[], const std::string& filename) {
+    std::cout << "loading parameters from file..." << std::endl;
+    std::ifstream inFile(filename);
+    if (inFile.is_open()) {
+        std::string line;
+        if (std::getline(inFile, line)) {
+            std::stringstream ss(line);
+            std::string item;
+            if (std::getline(ss, item, ',')) temp_vals[0] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[1] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[2] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[3] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[4] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[5] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[6] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[7] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[8] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[9] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[10] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[11] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[12] = std::stof(item);
+            if (std::getline(ss, item, ',')) temp_vals[13] = std::stof(item);
+        }
+        inFile.close();
+    } else {
+        std::cerr << "Unable to open file for reading" << std::endl;
+    }
+    std::cout << "loading parameters from file finished." << std::endl;
+}
+
 
 double get_mean(double arr[], int n){
       double sum = 0;
@@ -195,6 +241,26 @@ void KEDemoState::exitCode(void) {
     spdlog::info("In Joystick Test State");
 }
 
+void KEInitState::entryCode(void) {
+    spdlog::info("In KneeExo Init State");
+    spdlog::info("Press X to calibrate the knee exo");
+    spdlog::info("Press W to skip calibration");
+}
+void KEInitState::duringCode(void) {
+    if (loaded == false) {
+        double temp_vals[14] = {0};
+        std::string filename = "logs/onRunningParams.csv";
+        loadValues(temp_vals, filename);
+        robot->setCalibParams(temp_vals);
+        spdlog::info("Load params finished.");
+        loaded = true;
+    }
+}
+void KEInitState::exitCode(void) {
+    spdlog::info("Exit Init State");
+}
+
+
 
 void KEStandByState::entryCode(void) {
     spdlog::debug("In StandBy State");
@@ -221,7 +287,7 @@ void KEStandByState::duringCode(void) {
     }
 }
 void KEStandByState::exitCode(void) {
-        logHelperSB.endLog();
+        logHelperSB.endLog_clearItems();
 }
 
 
@@ -277,7 +343,7 @@ void KECalibState2::duringCode(void) {
     //spdlog::debug("SpringPos: {}", springPos[KNEE]);
     Eigen::VectorXd& motorVel = robot->getVelocity();
 
-    if (targetPosStep2Set <= 4) {
+    if (targetPosStep2Set <= 6) {
         if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
             robot->setJointPosition(caliStep1MotorPosScalar + (CALIB_ANGLE_1+abs(tau)/5.44)*M_PI/180.);
             targetPosStep2Set++;
@@ -659,10 +725,35 @@ void KECalibExerRobDriveState::entryCode(void) {
     //robot->startSensorStreaming();
     //robot->sensorCalibration();
 
-    robot->initCyclicPositionControl(controlMotorProfile);
+    robot->initCyclicVelocityControl(controlMotorProfile);
     usleep(1000);
+
+    if (robot->needCalib == false){
+        double motorAngleOffset = robot->calibParams[0];
+        double springAngleOffset = robot->calibParams[1];
+        robot->applyCalibrationMotor(motorAngleOffset);
+        robot->applyCalibrationSpring(springAngleOffset);
+
+        Eigen::VectorXd thigh_force_offsets = Eigen::VectorXd::Zero(3);
+        Eigen::VectorXd thigh_torque_offsets = Eigen::VectorXd::Zero(3);
+        Eigen::VectorXd shank_force_offsets = Eigen::VectorXd::Zero(3);
+        Eigen::VectorXd shank_torque_offsets = Eigen::VectorXd::Zero(3);
+
+        thigh_force_offsets << robot->calibParams[2], robot->calibParams[3], robot->calibParams[4];
+        thigh_torque_offsets << robot->calibParams[5], robot->calibParams[6], robot->calibParams[7];
+        shank_force_offsets << robot->calibParams[8], robot->calibParams[9], robot->calibParams[10];
+        shank_torque_offsets << robot->calibParams[11], robot->calibParams[12], robot->calibParams[13];
+
+        robot->ftsensor1->setOffsets(thigh_force_offsets, thigh_torque_offsets);
+        robot->ftsensor2->setOffsets(shank_force_offsets, shank_torque_offsets);
+        spdlog::info("Calibration parameters loaded to robot.");
+
+        motorPosForTrans = motorAngleOffset;
+    }
+
     targetMotorPosFilt = motorPosForTrans;
     action_t = 0.;
+
 }
 void KECalibExerRobDriveState::duringCode(void) {
 
@@ -691,14 +782,14 @@ void KECalibExerRobDriveState::duringCode(void) {
         if (emgFlag >= 4) emgFlag = 0;  // toggle between 0,1,2,3
     }
     if (robot->keyboard->getKeyCode() == KEYCODE_J) {
-        sav_temp_params_to_file(robot);
+        save_temp_params_to_file(robot);
     }
 
 
     testCondition = angleText[angleFlag] + emgText[emgFlag];
 
     if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
-    if (robot->keyboard->getS()==1) logHelperSB.endLog();  // toggle between 1 and 2
+    if (robot->keyboard->getS()==1) logHelperSB.endLog_clearItems();  // toggle between 1 and 2
 
     double kneeAngle = springPos[KNEE]*180./M_PI;
     double kneeAngleMot = motorPos[KNEE]*180./M_PI;
@@ -710,15 +801,19 @@ void KECalibExerRobDriveState::duringCode(void) {
     }
     else {targetSpringTor = 0; actionFlag=false;}
 
-    targetMotorPos = springPos[KNEE] + targetSpringTor / springK;
+    double prev_tarPos = targetMotorPosFilt;
 
+    targetMotorPos = springPos[KNEE] + targetSpringTor / springK;
     double targetMotorPosFiltTemp = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
     targetMotorPosFilt = targetMotorPosFilt + std::min(std::max(targetMotorPosFiltTemp - targetMotorPosFilt, -POS_INCRE_MAX), POS_INCRE_MAX);
     //targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
     //spdlog::debug("motor pos: {}, spring pos: {}", targetMotorPosFilt, springPos[KNEE]);
 
     // Set position
-    robot->setJointPosition(targetMotorPosFilt);
+
+    double targetVel = (targetMotorPosFilt - prev_tarPos) / dt() * 60.0 / 6.28;  // rad/s to rpm
+    robot->applyMotorPosition(targetMotorPosFilt, targetVel);
+    //robot->setJointPosition(targetMotorPosFilt);
 
     if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
         logHelperSB.recordLogData();
@@ -755,9 +850,10 @@ void KECalibExerHumDriveState::entryCode(void) {
     //usleep(10000);
     //robot->startSensorStreaming();
     //robot->sensorCalibration();
-    //robot->initCyclicPositionControl(controlMotorProfile);
-    //usleep(100);
+    robot->initCyclicVelocityControl(controlMotorProfile);
+    usleep(1000);
     targetMotorPosFilt = motorPosForTrans;
+    randomArray = getRandomizedArray();
 
     action_t = 0.;
 }
@@ -785,25 +881,52 @@ void KECalibExerHumDriveState::duringCode(void) {
 
     if (robot->keyboard->getW()==1) {
         resistanceFlag++; 
-        if (resistanceFlag >= 5) resistanceFlag = 1;  // toggle between 1,2,3,4
+        if (resistanceFlag >= 4) resistanceFlag = 1;  // toggle between 1,2,3
     }
     testCondition = resistanceText[resistanceFlag-1];
 
     if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
-    if (robot->keyboard->getS()==1) logHelperSB.endLog();  // toggle between 1 and 2
+    if (robot->keyboard->getS()==1) logHelperSB.endLog_clearItems();  // toggle between 1 and 2
+    if (robot->keyboard->getKeyCode() == KEYCODE_J) {
+        save_temp_params_to_file(robot);
+    }
 
     double kneeAngle = springPos[KNEE]*180./M_PI;
     double kneeAngleMot = motorPos[KNEE]*180./M_PI;
 
     //springVelFilt = springVelFilt + (1.0-decay) * (springVelVec[KNEE] - springVelFilt);
-    if (actionFlag == false) {targetSpringTor = 0;}
+    if (actionFlag == false) {targetSpringTor = 0; cycleCount = 0; randomArray = getRandomizedArray();}
     else {
-        if (inFlexing == 1 && kneeAngle < -78) inFlexing = 0;
-        else if (inFlexing == 0 && kneeAngle > -20) inFlexing = 1;
+        if (inFlexing == 1 && kneeAngle < LOWER_ANGLE_LIMIT) {
+            inFlexing = 0; 
+            if (checked >= 2){
+                cycleCount++;
+                checked = 1;
+            }
+            else {
+                checked++;
+            }
+        }
+        else if (inFlexing == 0 && kneeAngle > UPPER_ANGLE_LIMIT) {
+            inFlexing = 1;
+            if (checked >= 2){
+                cycleCount++;
+                checked = 1;
+            }
+            else {
+                checked++;
+            }
+        }
+        cycleCount = std::min(cycleCount, 4); // in total 5 cycles
 
-        if (inFlexing == 1) targetSpringTor = 5 * resistanceFlag;
-        else targetSpringTor = -MAX_TORQUE_LEVEL/4. * resistanceFlag;
+        float scaleFactor = MAX_TORQUE_LEVEL/24;
+
+        curTorque = scaleFactor * lowForceSet[randomArray[cycleCount]] + lowForceSet[4] * (resistanceFlag-1.0);
+        if (inFlexing == 1) targetSpringTor = curTorque;
+        else targetSpringTor = - curTorque;
     }
+
+    double prev_tarPos = targetMotorPosFilt;
 
     targetTorFilt = targetTorFilt + 0.03 * (targetSpringTor - targetTorFilt);  // smooth the torque in transition
     targetMotorPos = springPos[KNEE] + targetTorFilt / springK;
@@ -816,7 +939,11 @@ void KECalibExerHumDriveState::duringCode(void) {
 
 
     // Set position
-    robot->setJointPosition(targetMotorPosFilt);
+
+    double targetVel = (targetMotorPosFilt - prev_tarPos) / dt() * 60.0 / 6.28;  // rad/s to rpm
+    robot->applyMotorPosition(targetMotorPosFilt, targetVel);
+
+    //robot->setJointPosition(targetMotorPosFilt);
 
     if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
         logHelperSB.recordLogData();
@@ -832,31 +959,31 @@ void KECalibExerHumDriveState::duringCode(void) {
             std::cout << "RECORDING ";
         }
         std::cout << "Calib Hum Drive " << resistanceText[resistanceFlag-1] << ", " << modeText[inFlexing] << ", "
-          << actionText[actionFlag] << " -78deg ||";
+          << actionText[actionFlag] << ", Set " << std::to_string(cycleCount) << ", " << std::to_string((int)curTorque) << "Nm, " << std::to_string(LOWER_ANGLE_LIMIT) << " ||";
         
-        std::string left_str = "Calib Hum Drive " + resistanceText[resistanceFlag-1] + ", " + modeText[inFlexing] + ", " + actionText[actionFlag] + " -78deg ||";
-        std::string right_str = "|| " + std::to_string(UPPER_ANGLE_LIMIT) + "deg";
-        draw_progress_bar("||", "||", kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
+        //std::string left_str = "Calib Hum Drive " + resistanceText[resistanceFlag-1] + ", " + modeText[inFlexing] + ", " + actionText[actionFlag] + " -78deg ||";
+        //std::string right_str = "|| " + std::to_string(UPPER_ANGLE_LIMIT) + "deg";
+        //draw_progress_bar("||", "||", kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
         if (inFlexing) {
-            draw_progress_bar(left_str, right_str, kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
-            /*
+            //draw_progress_bar(left_str, right_str, kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
+            
             for (int i=-78; i<-18; i++) {
                 if (kneeAngle > i) std::cout << "-";
                 else std::cout << "+";
             }
-            */
+            
         }
         else {
-            draw_progress_bar(left_str, right_str, kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
-            /*
+            //draw_progress_bar(left_str, right_str, kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH);
+            
             std::cout << "|";
             for (int i=-78; i<-18; i++) {
                 if (kneeAngle > i) std::cout << "+";
                 else std::cout << "-";
             }
-            */
+            
         }
-        //std::cout << "|| -18deg" << std::endl;
+        std::cout << "|| " << std::to_string(UPPER_ANGLE_LIMIT) << std::endl;
     }
 }
 void KECalibExerHumDriveState::exitCode(void) {
@@ -875,9 +1002,11 @@ void KEActualExerRobDriveState::entryCode(void) {
     //usleep(10000);
     //robot->startSensorStreaming();
     //robot->sensorCalibration();
-    //robot->initCyclicVelocityControl(controlMotorProfile);
+    robot->initCyclicVelocityControl(controlMotorProfile);
     //usleep(1000);
-    robot->initProfilePositionControl(controlMotorProfile);
+    //robot->initProfilePositionControl(controlMotorProfile);
+    //robot->initCyclicPositionControl(controlMotorProfile);
+
     usleep(1000);
     targetMotorPosFilt = motorPosForTrans;
 
@@ -902,8 +1031,136 @@ void KEActualExerRobDriveState::duringCode(void) {
             user_butt_time += dt();
             if (user_butt_time > 0.1) {user_butt_pressed = true; user_butt_time = 0.0;}
         }
-        else if (gpio_button_status == 0 && user_butt_pressed == true && button_released == true) 
-        {actionFlag = 1 - actionFlag; action_t = test_duration / num_cycles - 0.1; user_butt_pressed = false; button_released = false;}
+        else if (gpio_button_status == 0 && user_butt_pressed == true && button_released == true) {
+            actionFlag = 1 - actionFlag; 
+            action_t = 0.0; 
+            user_butt_pressed = false; 
+            button_released = false;
+        }
+        else if (gpio_button_status == 1) {button_released = true;}
+        else ;
+    }
+
+    if (robot->keyboard->getW()==1) {
+        resistanceFlag++; 
+        if (resistanceFlag >= 4) resistanceFlag = 0;  // toggle between 1,2,3,4
+    }
+    if (robot->keyboard->getD()==1) {
+        freqFlag = 1 - freqFlag;  // toggle between 0 and 1
+    }
+    if (robot->keyboard->getKeyCode() == KEYCODE_J) {
+        save_temp_params_to_file(robot);
+    }
+    
+    sineFreq = freqTable[freqFlag];
+    test_duration = num_cycles / sineFreq;  // 5 cycles
+    testCondition = freqText[freqFlag] + resistanceText[resistanceFlag];
+
+    if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
+    if (robot->keyboard->getS()==1) logHelperSB.endLog_clearItems();  // toggle between 1 and 2
+
+    double kneeAngle = springPos[KNEE]*180./M_PI;
+    double kneeAngleMot = motorPos[KNEE]*180./M_PI;
+
+    //springVelFilt = springVelFilt + (1.0-decay) * (springVelVec[KNEE] - springVelFilt);
+    if (actionFlag == false) {
+        double tarTorq = LOWER_ANGLE_LIMIT - kneeAngle;  // go to 78 with propotional torque control
+        tarTorq = std::min(std::max(tarTorq, -10.), 10.);
+        targetTorFilt = targetTorFilt + 0.5 * (tarTorq - targetTorFilt);  // smooth the torque in transition
+        targetMotorPos = springPos[KNEE] + targetTorFilt / springK;
+    }
+    else if (test_duration > action_t) {
+        isSet = false;
+        action_t += dt();
+        //targetMotorPos = (-48-30*cos(2*M_PI*sineFreq*action_t)) * M_PI / 180;   
+        targetMotorPos = (LOWER_ANGLE_LIMIT + (UPPER_ANGLE_LIMIT - LOWER_ANGLE_LIMIT) / 2 - (UPPER_ANGLE_LIMIT - LOWER_ANGLE_LIMIT) / 2 * cos(2*M_PI*sineFreq*action_t)) * M_PI / 180;
+    }
+    else 
+    {
+        targetMotorPos = LOWER_ANGLE_LIMIT* M_PI / 180;
+    }
+
+
+    double prev_tarPos = targetMotorPosFilt;
+    double targetMotorPosFiltTemp = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    targetMotorPosFilt = targetMotorPosFilt + std::min(std::max(targetMotorPosFiltTemp - targetMotorPosFilt, -POS_INCRE_MAX), POS_INCRE_MAX);
+    
+    //targetMotorPosFilt = targetMotorPosFilt + (1.0-decay) * (targetMotorPos - targetMotorPosFilt);
+    //spdlog::debug("motor pos: {}, spring pos: {}", motorPos[KNEE], springPos[KNEE]);
+    //spdlog::debug("motor pos: {}, spring pos: {}", targetMotorPosFilt, springPos[KNEE]);
+
+
+    // Set position
+    double targetVel = (targetMotorPosFilt - prev_tarPos) / dt() * 60.0 / 6.28;  // rad/s to rpm
+    robot->applyMotorPosition(targetMotorPosFilt, targetVel);
+    //robot->setJointPosition(targetMotorPosFilt);
+
+    if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
+        logHelperSB.recordLogData();
+    }
+
+    double measuredTorq =  (motorPos[KNEE] - springPos[KNEE]) * springK;
+
+    if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
+        //std::cout << "action Flag: " << actionFlag << "action_time: " << action_t << std::endl;
+        //std::cout << "test_duration: " << test_duration << "  action_t: " << action_t << std::endl;
+        //std::cout << "Knee Angle: " << kneeAngle << "  Knee Angle Mot: " << kneeAngleMot << std::endl;
+        //std::cout << "Target Torque: " << targetTorFilt << std::endl;
+        //spdlog::debug("Action time: {}", action_t);
+        if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
+            std::cout << "RECORDING ";
+        }
+        std::cout << "Exercise Robot in Charge " << freqText[freqFlag] << ", " << resistanceText[resistanceFlag] << ", "
+          << actionText[actionFlag] << " -24Nm ||";
+        if (measuredTorq > 0) {
+            for (int i=2*MAX_TORQUE_LEVEL; i>0; i--) {
+                std::cout << "-";
+            }
+            std::cout << "|";
+            for (int i=0; i<2*MAX_TORQUE_LEVEL; i++) {
+                if ((measuredTorq*2) > i) std::cout << "+";
+                else std::cout << "-";
+            }
+        }
+        else {
+            for (int i=-2*MAX_TORQUE_LEVEL; i<0; i++) {
+                if ((measuredTorq*2) > i) std::cout << "-";
+                else std::cout << "+";
+            }
+            std::cout << "|";
+            for (int i=60; i>0; i--) {
+                std::cout << "-";
+            }
+        }
+        std::cout << "|| 24Nm" << std::endl;
+
+    }
+
+    /*
+
+    sineFreq = freqTable[freqFlag];
+    test_duration = num_cycles / sineFreq;  // 5 cycles
+
+    Eigen::VectorXd& springPos=robot->getSpringPosition();
+    Eigen::VectorXd& motorPos=robot->getPosition();
+    Eigen::VectorXd& springVelVec=robot->getSpringVelocity();
+
+    const char *const gpio_button_pin = "/sys/class/gpio/PAC.06/value";  // user button
+    std::ifstream button_gpio_file(gpio_button_pin);
+    if (button_gpio_file.is_open())
+    {
+        int gpio_button_status;
+        button_gpio_file >> gpio_button_status;
+        if (gpio_button_status == 0 && user_butt_pressed == false){
+            user_butt_time += dt();
+            if (user_butt_time > 0.1) {user_butt_pressed = true; user_butt_time = 0.0;}
+        }
+        else if (gpio_button_status == 0 && user_butt_pressed == true && button_released == true) {
+            actionFlag = 1 - actionFlag; 
+            action_t = test_duration / num_cycles - 0.2; 
+            user_butt_pressed = false; 
+            button_released = false;
+        }
         else if (gpio_button_status == 1) {button_released = true;}
         else ;
     }
@@ -915,12 +1172,15 @@ void KEActualExerRobDriveState::duringCode(void) {
     if (robot->keyboard->getD()==1) {
         freqFlag = 1 - freqFlag;  // toggle between 0 and 1
         if (freqFlag == 0) {
-            controlMotorProfile.profileVelocity = 200;
+            controlMotorProfile.profileVelocity = 500;
         }
         else {
             controlMotorProfile.profileVelocity = 1500;
         }
         robot->initProfilePositionControl(controlMotorProfile);
+    }
+    if (robot->keyboard->getKeyCode() == KEYCODE_J) {
+        save_temp_params_to_file(robot);
     }
     
     sineFreq = freqTable[freqFlag];
@@ -928,7 +1188,7 @@ void KEActualExerRobDriveState::duringCode(void) {
     testCondition = freqText[freqFlag] + resistanceText[resistanceFlag];
 
     if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
-    if (robot->keyboard->getS()==1) logHelperSB.endLog();  // toggle between 1 and 2
+    if (robot->keyboard->getS()==1) logHelperSB.endLog_clearItems();  // toggle between 1 and 2
 
     double kneeAngle = springPos[KNEE]*180./M_PI;
     double kneeAngleMot = motorPos[KNEE]*180./M_PI;
@@ -958,7 +1218,7 @@ void KEActualExerRobDriveState::duringCode(void) {
     else if (cycle_count < num_cycles*2+2) {
         isSet = false;
         action_t += dt();
-        if (action_t > (test_duration / num_cycles)){
+        if (action_t > (1.0 / sineFreq)){
             event_trigger = true;
             action_t = 0.0;
             cycle_count++;
@@ -1046,6 +1306,7 @@ void KEActualExerRobDriveState::duringCode(void) {
         //std::cout << "test_duration: " << test_duration << "  action_t: " << action_t << std::endl;
         //std::cout << "Knee Angle: " << kneeAngle << "  Knee Angle Mot: " << kneeAngleMot << std::endl;
         //std::cout << "Target Torque: " << targetTorFilt << std::endl;
+        //spdlog::debug("Action time: {}", action_t);
         if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
             std::cout << "RECORDING ";
         }
@@ -1074,6 +1335,8 @@ void KEActualExerRobDriveState::duringCode(void) {
         std::cout << "|| 24Nm" << std::endl;
 
     }
+
+    */
 }
 void KEActualExerRobDriveState::exitCode(void) {
     Eigen::VectorXd& motorPos=robot->getPosition();
@@ -1090,8 +1353,8 @@ void KETorCtrlSit2Stand::entryCode(void) {
     //usleep(10000);
     //robot->startSensorStreaming();
     //robot->sensorCalibration();
-    robot->initCyclicPositionControl(controlMotorProfile);
-    usleep(10000);
+    robot->initCyclicVelocityControl(controlMotorProfile);
+    usleep(1000);
 
     targetMotorPosFilt = motorPosForTrans;
 
@@ -1123,8 +1386,10 @@ void KETorCtrlSit2Stand::duringCode(void) {
         if (assistanceFlag >= 2) assistanceFlag = 0;  // toggle between 1,2,3,4
     }
     if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
-    if (robot->keyboard->getS()==1) logHelperSB.endLog();  // toggle between 1 and 2
-
+    if (robot->keyboard->getS()==1) logHelperSB.endLog_clearItems();  // toggle between 1 and 2
+    if (robot->keyboard->getKeyCode() == KEYCODE_J) {
+        save_temp_params_to_file(robot);
+    }
 
     int i = 0;
     int arrayLen = sit2stdAngSmp.size();
@@ -1157,6 +1422,7 @@ void KETorCtrlSit2Stand::duringCode(void) {
 
 
     //targetTorFilt = targetTorFilt + 0.95 * (targetSpringTor - targetTorFilt);  // smooth the torque in transition
+    double prev_tarPos = targetMotorPosFilt;
     targetTorFilt = targetSpringTor;
     targetMotorPos = springPos[KNEE] + targetTorFilt / springK;
 
@@ -1168,7 +1434,10 @@ void KETorCtrlSit2Stand::duringCode(void) {
 
 
     // Set position
-    robot->setJointPosition(targetMotorPosFilt);
+    //robot->setJointPosition(targetMotorPosFilt);
+    double targetVel = (targetMotorPosFilt - prev_tarPos) / dt() * 60.0 / 6.28;  // rad/s to rpm
+    robot->applyMotorPosition(targetMotorPosFilt, targetVel);
+
     if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
         logHelperSB.recordLogData();
     }
@@ -1193,7 +1462,7 @@ void KETorCtrlSit2Stand::duringCode(void) {
 void KETorCtrlSit2Stand::exitCode(void) {
     Eigen::VectorXd& motorPos=robot->getPosition();
     motorPosForTrans = motorPos[KNEE];
-    //logHelperSB.endLog();
+    //logHelperSB.endLog_clearItems();
     //robot->setPosition(std::vector<double> 0.0);
 }
 
@@ -1205,7 +1474,8 @@ void KECalibExerRobDriveState::initLoggerStandard(std::string testConsiditon) {
     std::strftime(buffer, sizeof(buffer), "%m_%d_%H_%M_%S", time_info);
     std::string time_now(buffer);
 
-    std::string filename = "logs/CalibExerRobDrive_" + testConsiditon + "_test" + std::to_string(logger_count) + "_" + time_now + ".csv";
+    std::string filename= "logs/HRI_" + time_now + "_CalibExerRobDrive_" + testConsiditon + "_test" + std::to_string(logger_count) + ".csv";
+
     logHelperSB.initLogger("KECalibExerRobDriveStateLog", filename, LogFormat::CSV, true);
     logHelperSB.add(running(), "Time (s)");
     logHelperSB.add(actionFlag, "actionFlag");
@@ -1250,7 +1520,8 @@ void KECalibExerHumDriveState::initLoggerStandard(std::string testConsiditon) {
     std::strftime(buffer, sizeof(buffer), "%m_%d_%H_%M_%S", time_info);
     std::string time_now(buffer);
 
-    std::string filename= "logs/CalibExerHumDrive_" + testConsiditon + "_test" + std::to_string(logger_count) + "_" + time_now + ".csv";
+    std::string filename= "logs/HRI_" + time_now + "_CalibExerHumDrive_" + testConsiditon + "_test" + std::to_string(logger_count) + ".csv";
+
     logHelperSB.initLogger("KECalibExerHumDriveStateLog", filename, LogFormat::CSV, true);
     logHelperSB.add(running(), "Time (s)");
     logHelperSB.add(actionFlag, "actionFlag");
@@ -1293,7 +1564,8 @@ void KEActualExerRobDriveState::initLoggerStandard(std::string testConsiditon) {
     std::strftime(buffer, sizeof(buffer), "%m_%d_%H_%M_%S", time_info);
     std::string time_now(buffer);
 
-    std::string filename= "logs/ActualExerRobDrive_" + testConsiditon + "_test" + std::to_string(logger_count) + "_" + time_now + ".csv";
+    std::string filename= "logs/HRI_" + time_now + "_ActualExerRobDrive_" + testConsiditon + "_test" + std::to_string(logger_count) + ".csv";
+
     logHelperSB.initLogger("KEActualExerRobDriveState", filename, LogFormat::CSV, true);
     logHelperSB.add(running(), "Time (s)");
     logHelperSB.add(actionFlag, "actionFlag");
@@ -1337,7 +1609,7 @@ void KETorCtrlSit2Stand::initLoggerStandard(std::string testConsiditon) {
     std::strftime(buffer, sizeof(buffer), "%m_%d_%H_%M_%S", time_info);
     std::string time_now(buffer);
 
-    std::string filename= "logs/ActualExerSTS_" + testConsiditon + "_test" + std::to_string(logger_count) + "_" + time_now + ".csv";
+    std::string filename= "logs/HRI_" + time_now + "_ActualExerSTS_" + testConsiditon + "_test" + std::to_string(logger_count) + ".csv";
     logHelperSB.initLogger("KETorCtrlSit2Stand", filename, LogFormat::CSV, true);
     logHelperSB.add(running(), "Time (s)");
     logHelperSB.add(actionFlag, "actionFlag");

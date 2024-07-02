@@ -72,6 +72,19 @@ class KEDemoState : public KETimedState {
     bool lock;
 };
 
+class KEInitState : public KETimedState {
+
+   public:
+    KEInitState(RobotKE * KE, const char *name = "KE Init State"):KETimedState(KE, name){};
+
+    void entryCode(void);
+    void duringCode(void);
+    void exitCode(void);
+
+    bool loaded = false;
+
+};
+
 class KEStandByState : public KETimedState {
 
    public:
@@ -366,14 +379,23 @@ class KECalibExerHumDriveState : public KETimedState {
      double targetMotorPosFilt = 0.;
      double decay = 0.75;  // the higher the decay, the lower the cut off frequency
      bool actionFlag = false;
+     int cycleCount = 0;
      double user_butt_time = 0.;
      bool user_butt_pressed = false;
      bool button_released = true;
      int inFlexing = 1;
      std::string testCondition = "init";
      int resistanceFlag = 1;
+     int checked = 0;
+     float curTorque = 0.0;
+     std::vector<int> randomArray;
+
+     std::vector<float> lowForceSet = {0,2,4,6,8};
+     //std::vector<float> midForceSet = {8,10,12,14,16};
+     //std::vector<float> highForceSet = {16,18,20,22,24};
+
      std::vector<std::string> actionText{"No Action", "In Action"};
-     std::vector<std::string> resistanceText{"ForceLevel5Nm", "ForceLevel10Nm","ForceLevel15Nm","ForceLevel20Nm"};
+     std::vector<std::string> resistanceText{"Low_Force", "Mid_Force","High_Force"};
      std::vector<std::string> modeText{"Extending", "Flexing"};
 
      LogHelper logHelperSB;
@@ -420,14 +442,14 @@ class KEActualExerRobDriveState : public KETimedState {
      std::string testCondition = "init";
      int freqFlag = 0;
      int resistanceFlag = 0;
-     std::vector<double> freqTable{0.2, 0.4};
-     std::vector<std::string> freqText{"SlowMove 0.3Hz", "FastMove 0.7Hz"};
+     std::vector<double> freqTable{0.25, 0.7};
+     std::vector<std::string> freqText{"SlowMove_0p3Hz", "FastMove_0p6Hz"};
      std::vector<std::string> actionText{"No Action", "In Action"};
      std::vector<std::string> resistanceText{"Relax", "ResistFlexion", "ResistExtension", "Co-Contraction"};
 
      LogHelper logHelperSB;
 
-     motorProfile controlMotorProfile = {1000, 1000, 1000};    
+     motorProfile controlMotorProfile = {500, 3000, 3000};    
 
      void initLoggerStandard(std::string testCondition); 
 };
@@ -465,7 +487,7 @@ class KETorCtrlSit2Stand : public KETimedState {
 
      motorProfile controlMotorProfile = {1000, 1000, 1000};     
      std::vector<double> sit2stdAngSmp{-110., -100., -80., -60., -40., -20., 0.};
-     std::vector<double> sit2stdTorProfile_40{0.07*3.57,0.1*3.57,0.28*3.57,0.24*3.57,0.1*3.57,0.02*3.57,0.02*3.57};  //raw data from the graph scale *3.57 to 1.
+     std::vector<double> sit2stdTorProfile_40{0.05*3.57,0.1*3.57,0.28*3.57,0.24*3.57,0.1*3.57,0.02*3.57,0.02*3.57};  //raw data from the graph scale *3.57 to 1.
 
      void initLoggerStandard(std::string testCondition); 
 };
