@@ -12,6 +12,7 @@
 #define IMU_ACCL 0
 #define IMU_GYRO 1
 #define IMU_ORIEN 2
+#define IMU_LINACC 3
 
 #define THIGH_FT 1
 #define SHANK_FT 2
@@ -19,8 +20,8 @@
 #define FT_TORQUE 2
 
 #define MAX_TORQUE_LEVEL 24
-#define UPPER_ANGLE_LIMIT -30
-#define LOWER_ANGLE_LIMIT -73
+#define UPPER_ANGLE_LIMIT -23
+#define LOWER_ANGLE_LIMIT -68
 #define DISPLAY_DOWNSAMPLE_FACTOR 10
 #define PROGRESS_BAR_WIDTH 80
 #define PROGRESS_BAR_WIDTH_SHORT 50
@@ -28,6 +29,7 @@
 
 #define KEYCODE_J 106
 #define KEYCODE_K 107
+#define KEYCODE_H 104
 
 #define POS_INCRE_MAX 0.4  //  higher than this will cause overvoltage, 0.4 is roughly 4000inc at the motor with 144 ratio and 4096 motor encoder resolution
 
@@ -362,7 +364,7 @@ void KECalibState2::duringCode(void) {
 
     if (targetPosStep2Set <= 6) {
         if(iterations()%DISPLAY_DOWNSAMPLE_FACTOR==1) {
-            robot->setJointPosition(caliStep1MotorPosScalar + (CALIB_ANGLE_1+abs(tau)/5.44)*M_PI/180.);
+            robot->setJointPosition(caliStep1MotorPosScalar + (CALIB_ANGLE_1+abs(tau)/springK-1.5)*M_PI/180.);
             targetPosStep2Set++;
         }
     }
@@ -798,12 +800,16 @@ void KECalibExerRobDriveState::duringCode(void) {
         emgFlag++; 
         if (emgFlag >= 4) emgFlag = 0;  // toggle between 0,1,2,3
     }
+    if (robot->keyboard->getKeyCode()==KEYCODE_H) {
+        freqFlag = 1 - freqFlag;  // toggle between 1 and 2
+    }
+    test_duration = 1. / freqValue[freqFlag];
     if (robot->keyboard->getKeyCode() == KEYCODE_J) {
         save_temp_params_to_file(robot);
     }
 
 
-    testCondition = angleText[angleFlag] + emgText[emgFlag];
+    testCondition = angleText[angleFlag] + "_" + emgText[emgFlag] + "_" + freqText[freqFlag];
 
     if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
     if (robot->keyboard->getS()==1) logHelperSB.endLog_clearItems();  // toggle between 1 and 2
@@ -814,7 +820,7 @@ void KECalibExerRobDriveState::duringCode(void) {
     if (actionFlag == false) {targetSpringTor = 0;}
     else if (action_t < test_duration) {
         action_t += dt();
-        targetSpringTor = MAX_TORQUE_LEVEL*sin(0.2*2*M_PI*action_t);
+        targetSpringTor = MAX_TORQUE_LEVEL*sin(freqValue[freqFlag]*2*M_PI*action_t);
     }
     else {targetSpringTor = 0; actionFlag=false;}
 
@@ -842,7 +848,7 @@ void KECalibExerRobDriveState::duringCode(void) {
         if(logHelperSB.isStarted() && logHelperSB.isInitialised()) {
             std::cout << "RECORDING ";
         }
-        std::string left_str = "Calib Rob Drive " + angleText[angleFlag] + ", " + emgText[emgFlag] + ", " + actionText[actionFlag] + " Time: 0s ||";
+        std::string left_str = "Calib Rob Drive " + testCondition + ", " + actionText[actionFlag] + " Time: 0s ||";
         std::string right_str = "|| 5s";
         float text_duration = 5;
         draw_progress_bar(left_str, right_str, action_t, 0, test_duration, PROGRESS_BAR_WIDTH);
@@ -900,7 +906,11 @@ void KECalibExerHumDriveState::duringCode(void) {
         resistanceFlag++; 
         if (resistanceFlag >= 4) resistanceFlag = 1;  // toggle between 1,2,3
     }
-    testCondition = resistanceText[resistanceFlag-1];
+    if (robot->keyboard->getD()==1) {
+        freqFlag++; 
+        if (freqFlag >= 2) freqFlag = 0;  // toggle between 0,1,2,3
+    }
+    testCondition = resistanceText[resistanceFlag-1] + "_" + freqText[freqFlag];
 
     if (robot->keyboard->getA()==1) initLoggerStandard(testCondition);  // toggle between 1 and 2
     if (robot->keyboard->getS()==1) logHelperSB.endLog_clearItems();  // toggle between 1 and 2
@@ -939,8 +949,22 @@ void KECalibExerHumDriveState::duringCode(void) {
         float scaleFactor = MAX_TORQUE_LEVEL/24;
 
         curTorque = scaleFactor * lowForceSet[randomArray[cycleCount]] + lowForceSet[4] * (resistanceFlag-1.0);
-        if (inFlexing == 1) targetSpringTor = curTorque;
-        else targetSpringTor = - curTorque;
+        if (inFlexing == 1) {
+            if (kneeAngle < LOWER_ANGLE_LIMIT || kneeAngle > UPPER_ANGLE_LIMIT) {
+                targetSpringTor = 0;
+            }
+            else {
+                targetSpringTor = curTorque;
+            }
+        }
+        else {
+            if (kneeAngle < LOWER_ANGLE_LIMIT || kneeAngle > UPPER_ANGLE_LIMIT) {
+                targetSpringTor = 0;
+            }
+            else {
+                targetSpringTor = -curTorque;
+            }
+        }
     }
 
     double prev_tarPos = targetMotorPosFilt;
@@ -973,7 +997,7 @@ void KECalibExerHumDriveState::duringCode(void) {
         //std::cout << "Calib Hum Drive " << resistanceText[resistanceFlag-1] << ", " << modeText[inFlexing] << ", "
         //  << actionText[actionFlag] << ", Set " << std::to_string(cycleCount) << ", " << std::to_string((int)curTorque) << "Nm, " << std::to_string(LOWER_ANGLE_LIMIT) << " ||";
         
-        std::string left_str = "Calib Hum Drive " + resistanceText[resistanceFlag-1] + ", " + modeText[inFlexing] + ", " + actionText[actionFlag] + ", Set " + std::to_string(cycleCount) + ", " + std::to_string((int)curTorque) + "Nm, " + std::to_string(LOWER_ANGLE_LIMIT) + " ||";
+        std::string left_str = "Calib Hum Drive " + testCondition + ", " + modeText[inFlexing] + ", " + actionText[actionFlag] + ", Set " + std::to_string(cycleCount) + ", " + std::to_string((int)curTorque) + "Nm, " + std::to_string(LOWER_ANGLE_LIMIT) + " ||";
         std::string right_str = "|| " + std::to_string(UPPER_ANGLE_LIMIT) + "deg";
         if (inFlexing) {
             draw_progress_bar(left_str, right_str, kneeAngle, LOWER_ANGLE_LIMIT, UPPER_ANGLE_LIMIT, PROGRESS_BAR_WIDTH, REVERSED);
@@ -1271,6 +1295,8 @@ void KECalibExerRobDriveState::initLoggerStandard(std::string testConsiditon) {
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_ACCL), "THIGH_IMU1_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_GYRO), "THIGH_IMU1_GYRO");
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_ORIEN), "THIGH_IMU1_OREN");
+    logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID0, IMU_LINACC), "THIGH_IMU0_LINACC");
+
     // for teensy 2
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_ACCL), "SHANK_IMU0_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_GYRO), "SHANK_IMU0_GYRO");
@@ -1278,6 +1304,7 @@ void KECalibExerRobDriveState::initLoggerStandard(std::string testConsiditon) {
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_ACCL), "SHANK_IMU1_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_GYRO), "SHANK_IMU1_GYRO");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_ORIEN), "SHANK_IMU1_OREN");
+    logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_LINACC), "SHANK_IMU0_LINACC");
 
     spdlog::debug("In Calibration Exercise Robot Drive State: logger created");
 
@@ -1316,6 +1343,8 @@ void KECalibExerHumDriveState::initLoggerStandard(std::string testConsiditon) {
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_ACCL), "THIGH_IMU1_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_GYRO), "THIGH_IMU1_GYRO");
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_ORIEN), "THIGH_IMU1_OREN");
+    logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID0, IMU_LINACC), "THIGH_IMU0_LINACC");
+
     // for teensy 2
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_ACCL), "SHANK_IMU0_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_GYRO), "SHANK_IMU0_GYRO");
@@ -1323,6 +1352,7 @@ void KECalibExerHumDriveState::initLoggerStandard(std::string testConsiditon) {
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_ACCL), "SHANK_IMU1_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_GYRO), "SHANK_IMU1_GYRO");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_ORIEN), "SHANK_IMU1_OREN");
+    logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_LINACC), "SHANK_IMU0_LINACC");
     spdlog::debug("In Calibration Exercise Human Drive State: logger created");
 
     if(logHelperSB.isInitialised()) {
@@ -1360,6 +1390,8 @@ void KEActualExerRobDriveState::initLoggerStandard(std::string testConsiditon) {
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_ACCL), "THIGH_IMU1_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_GYRO), "THIGH_IMU1_GYRO");
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_ORIEN), "THIGH_IMU1_OREN");
+    logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID0, IMU_LINACC), "THIGH_IMU0_LINACC");
+
     // for teensy 2
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_ACCL), "SHANK_IMU0_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_GYRO), "SHANK_IMU0_GYRO");
@@ -1367,6 +1399,7 @@ void KEActualExerRobDriveState::initLoggerStandard(std::string testConsiditon) {
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_ACCL), "SHANK_IMU1_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_GYRO), "SHANK_IMU1_GYRO");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_ORIEN), "SHANK_IMU1_OREN");
+    logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_LINACC), "SHANK_IMU0_LINACC");
 
     spdlog::debug("In Actual Exercise Robot in Charge State: logger created");
 
@@ -1404,6 +1437,8 @@ void KETorCtrlSit2Stand::initLoggerStandard(std::string testConsiditon) {
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_ACCL), "THIGH_IMU1_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_GYRO), "THIGH_IMU1_GYRO");
     logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID1, IMU_ORIEN), "THIGH_IMU1_OREN");
+    logHelperSB.add(robot->getTeensyData(robot->tsy1, IMU_ID0, IMU_LINACC), "THIGH_IMU0_LINACC");
+
     // for teensy 2
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_ACCL), "SHANK_IMU0_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_GYRO), "SHANK_IMU0_GYRO");
@@ -1411,6 +1446,7 @@ void KETorCtrlSit2Stand::initLoggerStandard(std::string testConsiditon) {
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_ACCL), "SHANK_IMU1_ACCL");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_GYRO), "SHANK_IMU1_GYRO");
     logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID1, IMU_ORIEN), "SHANK_IMU1_OREN");
+    logHelperSB.add(robot->getTeensyData(robot->tsy2, IMU_ID0, IMU_LINACC), "SHANK_IMU0_LINACC");
     spdlog::debug("In Actual Exercise STS State: logger created");
 
     if(logHelperSB.isInitialised()) {

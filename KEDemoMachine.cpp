@@ -48,6 +48,7 @@ bool goSkipCalibState(StateMachine & SM) {
     //keyboard or joystick press
     if ( sm.robot()->keyboard->getW()==1) {
         sm.robot()->needCalib = false;
+        sm.robot()-> encalibrate() ;
         return true;
     }
 

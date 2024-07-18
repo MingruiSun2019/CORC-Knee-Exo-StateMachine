@@ -138,7 +138,8 @@ class KECalibState2 : public KETimedState {
      double caliStep1MotorPosScalar = 0.;
      int targetPosStep2Set = 0;
      int calib_step = 0;
-     double tau = -6.;
+     double tau = -15.;
+     double springK = 2.30; // this is in Nm/deg
      bool calibDone = false;
      motorProfile controlMotorProfile = {1000, 10000, 10000};
 };
@@ -314,7 +315,7 @@ class KETorControlForSpring : public KETimedState {
 
     private:
      double state_t = 0.0;
-     double springK = 2.30;
+     double springK = 2.30 * 180 / M_PI;
      double targetSpringTor = 0.;
      double targetMotorPos = 0.;
      double targetMotorPosFilt = 0.;
@@ -347,10 +348,13 @@ class KECalibExerRobDriveState : public KETimedState {
      std::string testCondition = "init";
      int angleFlag = 0;
      int emgFlag = 0;
-     double test_duration = 5.;
+     int freqFlag = 0;
+     double test_duration = 0.;
      std::vector<std::string> actionText{"No Action", "In Action"};
      std::vector<std::string> angleText{"LowAngle", "HighAngle"};
+     std::vector<std::string> freqText{"SlowMove", "FastMove"};
      std::vector<std::string> emgText{"Relax", "Flexion", "Extension", "CoContract"};
+     double freqValue[2] = {0.25, 0.7};   // Hz
 
      LogHelper logHelperSB;
 
@@ -386,6 +390,7 @@ class KECalibExerHumDriveState : public KETimedState {
      int inFlexing = 1;
      std::string testCondition = "init";
      int resistanceFlag = 1;
+     int freqFlag = 0;
      int checked = 0;
      float curTorque = 0.0;
      std::vector<int> randomArray;
@@ -396,6 +401,7 @@ class KECalibExerHumDriveState : public KETimedState {
 
      std::vector<std::string> actionText{"No Action", "In Action"};
      std::vector<std::string> resistanceText{"Low_Force", "Mid_Force","High_Force"};
+     std::vector<std::string> freqText{"Slow_move", "Fast_move"};
      std::vector<std::string> modeText{"Extending", "Flexing"};
 
      LogHelper logHelperSB;
@@ -443,7 +449,7 @@ class KEActualExerRobDriveState : public KETimedState {
      int freqFlag = 0;
      int resistanceFlag = 0;
      std::vector<double> freqTable{0.25, 0.7};
-     std::vector<std::string> freqText{"SlowMove_0p3Hz", "FastMove_0p6Hz"};
+     std::vector<std::string> freqText{"SlowMove_0p25Hz", "FastMove_0p7Hz"};
      std::vector<std::string> actionText{"No Action", "In Action"};
      std::vector<std::string> resistanceText{"Relax", "ResistFlexion", "ResistExtension", "Co-Contraction"};
 
@@ -481,7 +487,7 @@ class KETorCtrlSit2Stand : public KETimedState {
 
      std::vector<double> assistanceLevel{10., 20.};
      std::vector<std::string> actionText{"No Action", "In Action"};
-     std::vector<std::string> assistanceText{"AssistLevel 15Nm", "AssistLevel 30Nm"};
+     std::vector<std::string> assistanceText{"AssistLevel 12Nm", "AssistLevel 24Nm"};
 
      LogHelper logHelperSB;
 
